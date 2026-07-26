@@ -26,8 +26,6 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SELF="$ROOT/$(basename "${BASH_SOURCE[0]}")"
 DEPLOY="$ROOT/deploy"
 ENV_FILE="$DEPLOY/.env"
-PANEL_PORT=8080
-WG_UDP_PORT=51820
 
 # --- ввод с терминала --------------------------------------------------------
 
@@ -174,6 +172,19 @@ else
   current_host="$wg_host"
   info "Записал deploy/.env (WG_HOST=$wg_host)"
 fi
+
+# Порты для проверок и итогового вывода: из окружения либо deploy/.env
+# (compose читает те же значения — источники должны совпадать).
+env_val() {
+  local name="$1" def="$2" v="${!name:-}"
+  if [ -z "$v" ] && [ -r "$ENV_FILE" ]; then
+    v="$(grep -E "^${name}=" "$ENV_FILE" | tail -1 | cut -d= -f2- \
+      | tr -d '\r' | sed -e "s/^[\"']//" -e "s/[\"']\$//")"
+  fi
+  printf '%s' "${v:-$def}"
+}
+PANEL_PORT="$(env_val PANEL_PORT 8080)"
+WG_UDP_PORT="$(env_val WG_PORT 51820)"
 
 # --- сборка и запуск ---------------------------------------------------------
 
