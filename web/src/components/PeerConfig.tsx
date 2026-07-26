@@ -100,10 +100,18 @@ export default function PeerConfig({ userId, userName }: Props) {
 
       // QR отдельно: если генерация не удалась, кнопки всё равно работают.
       // Тёмные модули на белом фоне — так QR надёжно читается камерой телефона.
+      //
+      // Размер и коррекция ошибок подобраны под длинные конфиги: у AmneziaWG
+      // добавляется девять строк параметров обфускации, код разрастается до
+      // версии 17 (85x85 модулей), и при 260 px модуль выходит меньше 3 px —
+      // камера такое не берёт. Уровень 'L' вместо 'M' убирает две версии
+      // (73x73), а 380 px дают ~5 px на модуль. Избыточная коррекция здесь не
+      // нужна: код показывается на экране, а не печатается на бумаге.
       try {
         const dataUrl = await QRCode.toDataURL(text, {
-          width: 260,
-          margin: 1,
+          errorCorrectionLevel: 'L',
+          width: 380,
+          margin: 2, // quiet zone: сканеры требуют светлое поле вокруг кода
           color: { dark: '#0f172a', light: '#ffffff' },
         });
         if (!cancelled) setQr(dataUrl);
@@ -195,15 +203,18 @@ export default function PeerConfig({ userId, userName }: Props) {
       {engine === 'awg' && <AmneziaNotice />}
 
       {qr ? (
+        // Картинка 380x380 показывается во всю доступную ширину (но не крупнее
+        // натурального размера): чем больше модуль на экране, тем увереннее
+        // сканируется — особенно длинный конфиг AmneziaWG.
         <img
           src={qr}
           alt={`QR-код конфигурации ${engine === 'awg' ? 'AmneziaWG' : 'WireGuard'} для ${userName}`}
-          width={260}
-          height={260}
-          className="rounded-lg bg-white p-1"
+          width={380}
+          height={380}
+          className="h-auto w-full max-w-[380px] rounded-lg bg-white p-2"
         />
       ) : (
-        <div className="flex h-[260px] w-[260px] items-center justify-center rounded-lg border border-slate-800 bg-slate-900/60 px-4 text-center text-sm text-slate-500">
+        <div className="flex aspect-square w-full max-w-[380px] items-center justify-center rounded-lg border border-slate-800 bg-slate-900/60 px-4 text-center text-sm text-slate-500">
           Не удалось построить QR-код — скачайте файл конфигурации
         </div>
       )}
