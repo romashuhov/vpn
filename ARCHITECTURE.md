@@ -376,9 +376,10 @@ text-slate-950 font-medium`, ссылки/активная навигация `t
   ports `${WG_PORT:-51820}/udp` и `${PANEL_PORT:-8080}:8080`, volume `wiredeck_data:/data`,
   env `WG_HOST` (обязателен), restart unless-stopped.
 - **Management-скрипты в корне** (основной способ управления): `start.sh` —
-  первичная настройка и запуск (проверка/установка Docker, WG_HOST → deploy/.env,
-  compose up, в конце URL панели; пароль администратора задаётся в веб-панели
-  при первом входе), `restart.sh` (down+up, применяет .env), `update.sh`
+  первичная настройка и запуск (проверка/установка Docker с ожиданием dpkg-lock,
+  WG_HOST → deploy/.env, автоподбор свободных портов при первой установке
+  (+1 от дефолта, фиксируются в .env), compose up, в конце URL панели; пароль
+  администратора задаётся в веб-панели при первом входе), `restart.sh` (down+up, применяет .env), `update.sh`
   (git pull + пересборка, только если задеплоен не текущий коммит — метка
   deploy/.deployed), `logs.sh`, `stop.sh` (volume сохраняется), `uninstall.sh`
   (контейнер+образ; данные — только с --purge или явным y/N-подтверждением).

@@ -173,6 +173,53 @@ else
   info "Записал deploy/.env (WG_HOST=$wg_host)"
 fi
 
+# --- Порты: при первом запуске подобрать свободные ---------------------------
+# Если дефолтный порт занят (например, на хосте уже живёт свой WireGuard или
+# что-то на 8080) — берём следующий свободный (+1). Выбор фиксируется в
+# deploy/.env и больше никогда не меняется: порт WG зашит в клиентские конфиги.
+# Если контейнер wiredeck уже существует, дефолтные порты заняты им самим —
+# подбор пропускается, работаем как есть.
+
+port_busy() { # $1 = tcp|udp, $2 = порт
+  command -v ss >/dev/null 2>&1 || return 1 # нет ss — считаем порт свободным
+  local flag="-tlnH"
+  [ "$1" = "udp" ] && flag="-ulnH"
+  [ -n "$(ss "$flag" "sport = :$2" 2>/dev/null)" ]
+}
+
+pick_free_port() { # $1 = tcp|udp, $2 = стартовый порт
+  local p="$2" tries=0
+  while port_busy "$1" "$p"; do
+    p=$((p + 1))
+    tries=$((tries + 1))
+    [ "$tries" -ge 100 ] && die "Не нашёл свободный $1-порт в диапазоне $2–$p."
+  done
+  printf '%s' "$p"
+}
+
+env_has() { [ -r "$ENV_FILE" ] && grep -qE "^$1=" "$ENV_FILE"; }
+
+ensure_port() { # $1 = имя переменной, $2 = tcp|udp, $3 = дефолт
+  env_has "$1" && return 0 # порт уже зафиксирован — не трогаем
+  if [ -n "$(docker ps -aq -f 'name=^wiredeck$' 2>/dev/null || true)" ]; then
+    return 0 # контейнер существует: занятость дефолтов — это мы сами
+  fi
+  local want got
+  want="${!1:-$3}"
+  got="$(pick_free_port "$2" "$want")"
+  [ "$got" != "$want" ] && warn "Порт $want/$2 занят — использую $got."
+  if printf '%s=%s\n' "$1" "$got" >> "$ENV_FILE" 2>/dev/null; then
+    info "Зафиксировал $1=$got в deploy/.env"
+  else
+    warn "Не удалось дописать $1=$got в deploy/.env (права?) — применяю только на этот запуск."
+    export "$1=$got"
+  fi
+  return 0
+}
+
+ensure_port WG_PORT udp 51820
+ensure_port PANEL_PORT tcp 8080
+
 # Порты для проверок и итогового вывода: из окружения либо deploy/.env
 # (compose читает те же значения — источники должны совпадать).
 env_val() {
