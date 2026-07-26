@@ -55,7 +55,8 @@ async function main(): Promise<void> {
     console.log(
       config.engine === 'awg'
         ? '[wg] Движок туннеля: AmneziaWG (WG_ENGINE=awg). Клиентские конфиги открываются ' +
-            'только приложениями AmneziaVPN / AmneziaWG, официальный WireGuard их не примет.'
+            'приложением AmneziaWG (не AmneziaVPN — оно ждёт свой формат vpn://), ' +
+            'официальный клиент WireGuard их не примет.'
         : '[wg] Движок туннеля: WireGuard (WG_ENGINE=wg)',
     );
     if (config.wg.host === '') {

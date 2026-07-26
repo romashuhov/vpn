@@ -208,7 +208,7 @@ ensure_engine() {
   if printf 'WG_ENGINE=%s\n' "$want" >> "$ENV_FILE" 2>/dev/null; then
     if [ "$want" = awg ]; then
       info "Движок туннеля: AmneziaWG (маскировка от DPI) — зафиксировал WG_ENGINE=awg в deploy/.env."
-      info "Клиентам понадобится приложение AmneziaVPN — официальный клиент WireGuard такие конфиги не открывает."
+      info "Клиентам понадобится приложение AmneziaWG (именно оно, не AmneziaVPN) — официальный клиент WireGuard такие конфиги не открывает."
     else
       info "Зафиксировал WG_ENGINE=wg в deploy/.env (обычный WireGuard)."
     fi
@@ -282,7 +282,9 @@ fi
 echo
 if [ "$WG_ENGINE_ACTIVE" = "awg" ]; then
   echo "  Движок туннеля: ${c_green}AmneziaWG${c_reset} — трафик маскируется от DPI."
-  echo "  ${c_yellow}Клиентам нужно приложение AmneziaVPN: https://amnezia.org/${c_reset}"
+  echo "  ${c_yellow}Клиентам нужно приложение AmneziaWG (не AmneziaVPN):${c_reset}"
+  echo "    Android: Google Play «AmneziaWG» либо APK — github.com/amnezia-vpn/amneziawg-android/releases"
+  echo "    iOS: App Store «AmneziaWG» · Windows: github.com/amnezia-vpn/amneziawg-windows-client/releases"
   echo "  ${c_yellow}Официальное приложение WireGuard эти конфиги не откроет.${c_reset}"
 else
   echo "  Движок туннеля: обычный WireGuard (клиентам подойдёт официальное приложение)."

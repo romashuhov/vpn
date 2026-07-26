@@ -65,7 +65,9 @@ export function renderClientConfig(
   ];
   if (cfg.wg.mtu !== '') lines.push(`MTU = ${cfg.wg.mtu}`);
   // AmneziaWG: S1/S2/H1..H4 обязаны совпадать с серверными, иначе связи не будет.
-  // Такой конфиг открывается только клиентами AmneziaVPN / AmneziaWG.
+  // Такой конфиг открывается приложением AmneziaWG (форк клиента WireGuard).
+  // Основное приложение AmneziaVPN ждёт свой упакованный формат vpn:// и
+  // этот текст не импортирует.
   if (cfg.engine === 'awg') lines.push(...awgConfigLines(getAwgParams(cfg)));
   lines.push(
     '',

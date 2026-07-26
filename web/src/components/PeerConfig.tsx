@@ -34,20 +34,32 @@ function loadEngine(): Promise<WgEngine> {
   return enginePromise;
 }
 
-/** Конфиг AmneziaWG не открывается официальным клиентом WireGuard — предупреждаем заранее. */
+/**
+ * Конфиг AmneziaWG открывается НЕ любым клиентом Amnezia: этот текстовый
+ * формат понимает приложение «AmneziaWG» (форк клиента WireGuard). Основное
+ * приложение «AmneziaVPN» ждёт свой упакованный формат vpn:// и такой QR
+ * не принимает — предупреждаем заранее, иначе пользователь упрётся в
+ * «ошибка импорта» и решит, что сломана панель.
+ */
 function AmneziaNotice() {
   return (
     <div className="flex w-full items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-left text-amber-400">
       <TriangleAlert size={16} className="mt-0.5 shrink-0" />
-      <div className="min-w-0 space-y-1 text-xs leading-relaxed">
-        <p className="text-sm font-medium">Нужно приложение AmneziaVPN</p>
+      <div className="min-w-0 space-y-1.5 text-xs leading-relaxed">
+        <p className="text-sm font-medium">Нужно приложение AmneziaWG</p>
         <p className="text-amber-400/80">
-          Конфиг использует AmneziaWG (WireGuard с обфускацией) — официальное приложение
-          WireGuard его <span className="font-medium">не откроет</span>. Установите AmneziaVPN
-          для Android, iOS, Windows или macOS, затем импортируйте файл или отсканируйте
-          QR-код.
+          Именно <span className="font-medium">AmneziaWG</span>, а не AmneziaVPN: основное
+          приложение Amnezia такой QR не принимает, а официальный клиент WireGuard не
+          понимает обфускацию. Android — Google Play или APK с GitHub, iOS — App Store,
+          Windows — сборка с GitHub.
         </p>
-        <p className="font-medium break-all select-all text-amber-300">https://amnezia.org/</p>
+        <p className="break-all text-amber-300/90 select-all">
+          github.com/amnezia-vpn/amneziawg-android/releases
+        </p>
+        <p className="text-amber-400/70">
+          Если QR не сканируется — нажмите «Скачать .conf», перешлите файл и откройте его
+          в приложении: этот способ работает всегда.
+        </p>
       </div>
     </div>
   );
@@ -110,9 +122,9 @@ export default function PeerConfig({ userId, userName }: Props) {
       try {
         const dataUrl = await QRCode.toDataURL(text, {
           errorCorrectionLevel: 'L',
-          width: 380,
-          margin: 2, // quiet zone: сканеры требуют светлое поле вокруг кода
-          color: { dark: '#0f172a', light: '#ffffff' },
+          width: 420,
+          margin: 4, // quiet zone по ISO/IEC 18004; при меньшей сканеры сбоят
+          color: { dark: '#000000', light: '#ffffff' },
         });
         if (!cancelled) setQr(dataUrl);
       } catch {
@@ -209,12 +221,12 @@ export default function PeerConfig({ userId, userName }: Props) {
         <img
           src={qr}
           alt={`QR-код конфигурации ${engine === 'awg' ? 'AmneziaWG' : 'WireGuard'} для ${userName}`}
-          width={380}
-          height={380}
-          className="h-auto w-full max-w-[380px] rounded-lg bg-white p-2"
+          width={420}
+          height={420}
+          className="h-auto w-full max-w-[420px] rounded-lg bg-white p-2"
         />
       ) : (
-        <div className="flex aspect-square w-full max-w-[380px] items-center justify-center rounded-lg border border-slate-800 bg-slate-900/60 px-4 text-center text-sm text-slate-500">
+        <div className="flex aspect-square w-full max-w-[420px] items-center justify-center rounded-lg border border-slate-800 bg-slate-900/60 px-4 text-center text-sm text-slate-500">
           Не удалось построить QR-код — скачайте файл конфигурации
         </div>
       )}

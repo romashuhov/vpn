@@ -230,7 +230,7 @@ export default function Dashboard() {
                 </span>
                 {overview.server.engine === 'awg' && (
                   <span
-                    title="Трафик маскируется под обычный UDP — клиентам нужно приложение AmneziaVPN"
+                    title="Трафик маскируется от DPI — клиентам нужно приложение AmneziaWG (не AmneziaVPN)"
                     className="inline-flex items-center gap-1.5 rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-[11px] font-medium text-sky-400"
                   >
                     <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />

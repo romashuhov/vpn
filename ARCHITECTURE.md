@@ -392,7 +392,7 @@ SPA на русском. `web/src/lib/api.ts` (готово) — единств�
 // qrcode, toDataURL, размер ~260px), кнопки «Скачать .conf» (Blob) и «Скопировать».
 // При server.engine === 'awg' (api.overview(), промис кэшируется на модуль,
 // ошибки молча → 'wg') над QR — амбер-плашка: конфиг открывается только
-// приложением AmneziaVPN (https://amnezia.org/), официальный клиент WireGuard
+// приложением AmneziaWG (не AmneziaVPN — оно ждёт формат vpn://), официальный клиент WireGuard
 // его не поймёт.
 
 // pages/Login.tsx — props: { needsSetup: boolean; onSuccess: () => void }
@@ -458,7 +458,7 @@ text-slate-950 font-medium`, ссылки/активная навигация `t
   (+1 от дефолта, фиксируются в .env), `ensure_engine` — при первичной установке
   (нет строки `WG_ENGINE` в .env И нет контейнера `wiredeck`) дописывает
   `WG_ENGINE=awg`, существующие установки не трогает; compose up, в конце URL
-  панели и напоминание про приложение AmneziaVPN, если движок `awg`; пароль
+  панели и напоминание про приложение AmneziaWG, если движок `awg`; пароль
   администратора задаётся в веб-панели при первом входе), `restart.sh` (down+up, применяет .env), `update.sh`
   (git pull + пересборка, только если задеплоен не текущий коммит — метка
   deploy/.deployed), `logs.sh`, `stop.sh` (volume сохраняется), `uninstall.sh`
