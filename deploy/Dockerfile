@@ -83,6 +83,13 @@ RUN git clone --depth 1 --branch "$AMNEZIAWG_TOOLS_REF" \
 # ---------------------------------------------------------------------------
 FROM node:24-alpine AS runtime
 
+# Метка нужна скриптам: после каждой пересборки предыдущий образ остаётся
+# висеть как <none> и не удаляется никогда — на типовом VPS это упирается в
+# «нет места». start.sh/update.sh чистят такие слои через
+# `docker image prune --filter label=org.wiredeck.image=1`, и фильтр обязателен:
+# без него prune снёс бы висячие образы чужих проектов на том же хосте.
+LABEL org.wiredeck.image=1
+
 RUN apk add --no-cache wireguard-tools iptables ip6tables bash iproute2
 
 # Движок AmneziaWG. wireguard-tools (wg/wg-quick) выше остаётся нетронутым —

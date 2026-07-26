@@ -15,13 +15,16 @@ import {
 } from '../auth.js';
 import { createUser, deleteUser, getSetting, getUser, listUsers, updateUser } from '../db.js';
 import { buildAmneziaExport } from '../amnezia.js';
+import { confFileName } from '../filename.js';
 import { nextFreeAddress } from '../ipam.js';
 import { buildServerState, renderClientConfig } from '../wg/confgen.js';
 import { genKeypair, genPresharedKey } from '../wg/keys.js';
-import { onlineUsers, overview, timeseries, topUsers } from '../stats/queries.js';
+import { isHandshakeOnline, onlineUsers, overview, timeseries, topUsers } from '../stats/queries.js';
 
 const SESSION_COOKIE = 'sid';
-const ONLINE_WINDOW_MS = 180_000; // хендшейк < 180 сек назад = онлайн
+// Критерий «онлайн» живёт в stats/queries.ts (isHandshakeOnline): раньше здесь
+// была своя копия условия, и правку про метку хендшейка «из будущего» пришлось
+// бы держать синхронной в трёх местах вручную.
 const LOGIN_FAIL_DELAY_MS = 500; // задержка перед 401 при неверном пароле
 const LOGIN_MAX_FAILURES = 5; // после стольких неудач подряд — временная блокировка IP
 const LOGIN_BLOCK_BASE_MS = 30_000; // первая блокировка; дальше — экспоненциально
@@ -110,7 +113,9 @@ function toDTO(u: UserRow): UserDTO {
     totalRx: u.totalRx,
     totalTx: u.totalTx,
     lastHandshake: u.lastHandshake,
-    online: u.lastHandshake !== null && Date.now() - u.lastHandshake < ONLINE_WINDOW_MS,
+    // Метка из будущего (скачок системных часов) при простом «now - ts < 180с»
+    // давала отрицательную разницу и делала пира вечно онлайн — см. queries.ts.
+    online: isHandshakeOnline(u.lastHandshake),
   };
 }
 
@@ -349,9 +354,10 @@ export function registerRoutes(
       return reply.code(500).send({ error: 'Серверный ключ не найден в настройках' });
     }
     const text = renderClientConfig(cfg, serverPublicKey, user);
-    // Безопасное имя файла: только [a-zA-Z0-9_-], иначе wg-client-<id>.
-    const base = user.name.replace(/[^a-zA-Z0-9_-]/g, '');
-    const filename = `${base.length > 0 ? base : `wg-client-${user.id}`}.conf`;
+    // Имя файла — из имени пользователя с транслитерацией кириллицы (та же
+    // функция, что в панели: web/src/lib/filename.ts). Раньше кириллица просто
+    // вырезалась, и все русские имена превращались в безликое wg-client-<id>.
+    const filename = confFileName(user.name, user.id);
     return reply
       .code(200)
       .header('Content-Type', 'text/plain; charset=utf-8')

@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import * as QRCode from 'qrcode';
 import { Check, Copy, Download, Link2, Loader2 } from 'lucide-react';
 import { api } from '../lib/api';
+import { confFileName } from '../lib/filename';
 import type { AmneziaExportDTO, WgEngine } from '../lib/types';
 
 interface Props {
@@ -25,12 +26,6 @@ const QR_OPTIONS = {
   margin: 4, // quiet zone по ISO/IEC 18004; при меньшей сканеры сбоят
   color: { dark: '#000000', light: '#ffffff' },
 } as const;
-
-/** Имя файла как на сервере: только [a-zA-Z0-9_-], иначе wg-client-<id>. */
-function confFileName(userName: string, userId: number): string {
-  const safe = userName.replace(/[^a-zA-Z0-9_-]/g, '');
-  return `${safe || `wg-client-${userId}`}.conf`;
-}
 
 // Движок туннеля меняется только рестартом сервера — тянем один раз на вкладку
 // и делим промис между всеми PeerConfig (их на странице может быть несколько).

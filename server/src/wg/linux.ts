@@ -17,23 +17,94 @@ import { awgConfigLines } from '../awg.js';
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * Таймаут для быстрых команд (`wg show dump`, `wg syncconf`, `ip …`). Все они
+ * либо отвечают за миллисекунды, либо не ответят вообще: `wg` общается с ядром
+ * или с UAPI-сокетом userspace-демона, и если сокет повис (демон в D-state,
+ * нехватка памяти, зависший amneziawg-go), ждать бессмысленно. Без таймаута
+ * промис не разрешался бы НИКОГДА: поллер остался бы с взведённым флагом
+ * «тик выполняется» и молча перестал собирать статистику — без единой ошибки
+ * в логах.
+ */
+const EXEC_TIMEOUT_MS = 10_000;
+
+/**
+ * Таймаут для `wg-quick up/down`. Здесь 10 секунд мало: скрипт последовательно
+ * дёргает ip/sysctl и десяток правил iptables (на нагруженном хосте с большим
+ * набором правил это уже секунды), а в контейнере без модуля ядра ещё и
+ * поднимает userspace-демон (amneziawg-go/wireguard-go). Полторы минуты —
+ * заведомо больше нормального времени подъёма и заведомо конечны.
+ */
+const QUICK_TIMEOUT_MS = 90_000;
+
+/**
+ * Запас поверх execFile.timeout для страховочного таймера (см. run()).
+ */
+const WALL_GRACE_MS = 5_000;
+
+/**
+ * Сигнал завершения по таймауту для wg-quick.
+ *
+ * Для быстрых команд годится SIGKILL, но wg-quick — это shell-скрипт, который
+ * выполняет шаги последовательно: ip link add, ip addr, setconf, затем PostUp с
+ * набором правил iptables. Убитый SIGKILL посреди этой последовательности он не
+ * откатывает и свой trap не отрабатывает — остаётся созданный интерфейс БЕЗ
+ * правил MASQUERADE/FORWARD/TCPMSS. Дальше up() при следующем запуске увидит
+ * существующий интерфейс и уйдёт в sync(), который PostUp не выполняет, — то
+ * есть правила не восстановятся сами никогда, а симптом («хендшейк проходит,
+ * панель зелёная, интернета нет») выглядит как проблема на стороне клиента.
+ * SIGTERM даёт скрипту отработать trap и снести полуподнятый интерфейс;
+ * страховочный таймер run() всё равно не даст висеть вечно.
+ */
+const QUICK_KILL_SIGNAL: NodeJS.Signals = 'SIGTERM';
+
 function describeExecError(e: unknown): string {
   if (e !== null && typeof e === 'object') {
-    const err = e as { stderr?: unknown; message?: unknown };
+    const err = e as { stderr?: unknown; message?: unknown; killed?: unknown; signal?: unknown };
     const stderr = typeof err.stderr === 'string' ? err.stderr.trim() : '';
     const message = typeof err.message === 'string' ? err.message : String(e);
-    return stderr !== '' ? `${message} — stderr: ${stderr}` : message;
+    const timedOut = err.killed === true ? ' (превышен таймаут, процесс убит)' : '';
+    return stderr !== '' ? `${message}${timedOut} — stderr: ${stderr}` : `${message}${timedOut}`;
   }
   return String(e);
 }
 
 /** Запуск внешней команды; ошибка оборачивается вместе со stderr. */
-async function run(cmd: string, args: string[]): Promise<string> {
+async function run(
+  cmd: string,
+  args: string[],
+  timeoutMs: number = EXEC_TIMEOUT_MS,
+  killSignal: NodeJS.Signals = 'SIGKILL',
+): Promise<string> {
+  const exec = execFileAsync(cmd, args, {
+    timeout: timeoutMs,
+    killSignal,
+    // `wg show dump` на установке с сотнями пиров легко перерастает дефолтный
+    // 1 МБ, а переполнение буфера убивает процесс и роняет сбор статистики.
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  // Страховка поверх execFile.timeout. Node разрешает промис только когда
+  // закрылись и процесс, и его stdout/stderr; если пайп унаследовал внучатый
+  // процесс (userspace-демон, отпочковавшийся от wg-quick), SIGKILL по самому
+  // процессу промис не разрешит. Тогда ждать нечего — рвём по стене.
+  let guard: NodeJS.Timeout | undefined;
+  const wall = new Promise<never>((_, reject) => {
+    guard = setTimeout(
+      () => reject(new Error(`нет ответа дольше ${timeoutMs + WALL_GRACE_MS} мс`)),
+      timeoutMs + WALL_GRACE_MS,
+    );
+  });
+  // Если победит страховочный таймер, промис exec останется отвергнутым без
+  // обработчика — это уронило бы процесс по unhandledRejection.
+  exec.catch(() => {});
+
   try {
-    const { stdout } = await execFileAsync(cmd, args);
+    const { stdout } = await Promise.race([exec, wall]);
     return stdout;
   } catch (e) {
     throw new Error(`команда «${cmd} ${args.join(' ')}» завершилась с ошибкой: ${describeExecError(e)}`);
+  } finally {
+    clearTimeout(guard);
   }
 }
 
@@ -105,7 +176,24 @@ export class LinuxRunner implements WgRunner {
       return;
     }
     await this.writeQuickConf(state);
-    await run(this.cfg.wgQuickBin, ['up', this.confPath()]);
+    try {
+      await run(this.cfg.wgQuickBin, ['up', this.confPath()], QUICK_TIMEOUT_MS, QUICK_KILL_SIGNAL);
+    } catch (e) {
+      // Диагностика обязательна: вызывающий (index.ts) ловит ошибку и продолжает
+      // работу панели, а сам по себе отказ up() почти всегда означает, что
+      // интерфейс остался в промежуточном состоянии, из которого автоматика уже
+      // не выберется (следующий старт увидит link и уйдёт в sync без PostUp).
+      console.error(
+        `[wg] ${this.cfg.wgQuickBin} up завершился неудачей. Интерфейс мог остаться ` +
+          'ПОЛУПОДНЯТЫМ: адрес назначен, а правила PostUp (MASQUERADE/FORWARD/TCPMSS) — нет. ' +
+          'Симптом у клиентов: хендшейк проходит, панель зелёная, интернета нет. ' +
+          'Сам по себе он не починится — при следующем старте панель увидит существующий ' +
+          'интерфейс и пойдёт по пути sync(), который PostUp НЕ выполняет. ' +
+          `Погасите интерфейс вручную и поднимите заново: ${this.cfg.wgQuickBin} down ` +
+          `${this.confPath()} && ${this.cfg.wgQuickBin} up ${this.confPath()}`,
+      );
+      throw e;
+    }
     console.log(`[wg] интерфейс ${state.iface} поднят, пиров: ${state.peers.length}`);
   }
 
@@ -126,7 +214,7 @@ export class LinuxRunner implements WgRunner {
 
   async down(): Promise<void> {
     try {
-      await run(this.cfg.wgQuickBin, ['down', this.confPath()]);
+      await run(this.cfg.wgQuickBin, ['down', this.confPath()], QUICK_TIMEOUT_MS, QUICK_KILL_SIGNAL);
       console.log(`[wg] интерфейс ${this.iface} погашен`);
     } catch (e) {
       // Ошибки down() глотаем: интерфейс мог быть уже погашен.
@@ -136,7 +224,9 @@ export class LinuxRunner implements WgRunner {
 
   private async linkExists(iface: string): Promise<boolean> {
     try {
-      await execFileAsync('ip', ['link', 'show', iface]);
+      // Через run(): нужен тот же таймаут, что и у остальных команд. Зависший
+      // `ip link show` на старте заблокировал бы bootstrap целиком.
+      await run('ip', ['link', 'show', iface]);
       return true;
     } catch {
       return false;

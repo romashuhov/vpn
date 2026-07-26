@@ -3,5 +3,6 @@ dist/
 data/
 .env
 deploy/.deployed
+deploy/.lock
 *.log
 .DS_Store

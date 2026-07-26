@@ -81,9 +81,26 @@ interface Statements {
   deleteUser: Database.Statement;
 }
 
+/** Одна почасовая корзина трафика (unix ms начала часа + байты). */
+export interface TrafficBucket {
+  hourTs: number;
+  rx: number;
+  tx: number;
+}
+
+/** Счётчики юзера, записываемые одним апдейтом. */
+export interface CounterUpdate {
+  totalRx: number;
+  totalTx: number;
+  lastHandshake: number | null;
+}
+
 let db: Database.Database | null = null;
 let stmts: Statements | null = null;
 let deleteUserTx: ((id: number) => boolean) | null = null;
+let recordTrafficTx:
+  | ((userId: number, c: CounterUpdate, buckets: readonly TrafficBucket[]) => void)
+  | null = null;
 
 function requireDb(): Database.Database {
   if (!db) throw new Error('db: база данных не открыта — сначала вызовите openDb()');
@@ -144,6 +161,21 @@ export function openDb(dbPath: string): void {
     st().deleteTraffic.run(id);
     return st().deleteUser.run(id).changes > 0;
   });
+  // Счётчики юзера и почасовые корзины обязаны меняться атомарно. Поллер к
+  // этому моменту уже вычислил дельту относительно предыдущего замера, и если
+  // total_* записались, а traffic_hourly нет (SQLITE_BUSY при конкурентном
+  // чекпойнте WAL, SQLITE_FULL, диск ушёл в read-only), то «трафик за всё
+  // время» навсегда разойдётся с графиками: восстановить пропавшую корзину
+  // неоткуда. Транзакция даёт всё-или-ничего, а поллер по факту исключения
+  // не двигает базовую точку и пересчитает ту же дельту на следующем тике.
+  recordTrafficTx = handle.transaction(
+    (userId: number, c: CounterUpdate, buckets: readonly TrafficBucket[]): void => {
+      st().updateCounters.run(c.totalRx, c.totalTx, c.lastHandshake, userId);
+      for (const b of buckets) {
+        if (b.rx > 0 || b.tx > 0) st().addHourly.run(userId, b.hourTs, b.rx, b.tx);
+      }
+    },
+  );
 }
 
 /**
@@ -212,4 +244,63 @@ export function updateCounters(
 
 export function addHourlyTraffic(userId: number, hourTs: number, rxDelta: number, txDelta: number): void {
   st().addHourly.run(userId, hourTs, rxDelta, txDelta);
+}
+
+/**
+ * Отдельный тип ошибки для невалидного замера. Нужен вызывающему (поллеру),
+ * чтобы отличить ДЕТЕРМИНИРОВАННУЮ ошибку данных от транзиентной ошибки SQLite:
+ * транзиентную имеет смысл повторить следующим тиком, а испорченный замер будет
+ * падать бесконечно, пока базовую точку не сбросят принудительно.
+ */
+export class InvalidMetricError extends Error {}
+
+/**
+ * Колонки rx/tx/total_* объявлены INTEGER, но SQLite хранит то, что ему
+ * привязали: дробное значение осело бы в базе как REAL и потом «поехало» бы
+ * в суммах и сравнениях. Пропорциональная развёртка дельты по часам даёт
+ * дроби, поэтому округляем здесь, а не молча портим тип колонки.
+ * NaN/Infinity — это уже сломанный замер: лучше громкая ошибка, чем запись,
+ * после которой суммы юзера станут NULL/NaN без шанса на восстановление.
+ */
+function toInt(value: number, what: string): number {
+  if (!Number.isFinite(value)) {
+    throw new InvalidMetricError(`db: недопустимое значение ${what}: ${String(value)}`);
+  }
+  return Math.round(value);
+}
+
+/**
+ * Атомарная запись результата одного тика поллера: новые счётчики юзера
+ * (total_rx/total_tx/last_handshake) и почасовые корзины трафика.
+ *
+ * `hourTs/rxDelta/txDelta` — основная (текущая) корзина; `extraBuckets` —
+ * дополнительные часы, когда дельту размазывают по пропущенным часам.
+ * Либо применяется всё, либо не применяется ничего.
+ */
+export function recordTraffic(
+  userId: number,
+  counters: CounterUpdate,
+  hourTs: number,
+  rxDelta: number,
+  txDelta: number,
+  extraBuckets?: readonly TrafficBucket[],
+): void {
+  if (!recordTrafficTx) throw new Error('db: база данных не открыта — сначала вызовите openDb()');
+
+  const buckets: TrafficBucket[] = [
+    { hourTs: toInt(hourTs, 'hour_ts'), rx: toInt(rxDelta, 'rx'), tx: toInt(txDelta, 'tx') },
+  ];
+  for (const b of extraBuckets ?? []) {
+    buckets.push({ hourTs: toInt(b.hourTs, 'hour_ts'), rx: toInt(b.rx, 'rx'), tx: toInt(b.tx, 'tx') });
+  }
+
+  recordTrafficTx(
+    userId,
+    {
+      totalRx: toInt(counters.totalRx, 'total_rx'),
+      totalTx: toInt(counters.totalTx, 'total_tx'),
+      lastHandshake: counters.lastHandshake === null ? null : toInt(counters.lastHandshake, 'last_handshake'),
+    },
+    buckets,
+  );
 }
