@@ -223,7 +223,22 @@ export default function Dashboard() {
                 <span className="text-lg text-slate-500">WG_HOST не задан</span>
               )
             }
-            sub={`${overview.server.iface} · ${overview.server.subnet}`}
+            sub={
+              <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span>
+                  {overview.server.iface} · {overview.server.subnet}
+                </span>
+                {overview.server.engine === 'awg' && (
+                  <span
+                    title="Трафик маскируется под обычный UDP — клиентам нужно приложение AmneziaVPN"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-[11px] font-medium text-sky-400"
+                  >
+                    <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
+                    AmneziaWG
+                  </span>
+                )}
+              </span>
+            }
           />
         </div>
       ) : (

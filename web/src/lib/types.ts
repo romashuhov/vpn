@@ -18,6 +18,9 @@ export interface UserDTO {
   online: boolean;
 }
 
+/** Движок туннеля: 'wg' — ванильный WireGuard, 'awg' — AmneziaWG (обфускация против DPI). */
+export type WgEngine = 'wg' | 'awg';
+
 export interface ServerInfo {
   host: string;
   port: number;
@@ -25,6 +28,7 @@ export interface ServerInfo {
   subnet: string;
   iface: string;
   mock: boolean;
+  engine: WgEngine;
 }
 
 export interface OverviewDTO {

@@ -40,6 +40,7 @@ if [ "$(id -u)" -ne 0 ]; then
     # sudo с env_reset вычищает окружение — протаскиваем наши переменные через `env`.
     envargs=()
     [ -n "${WG_HOST+x}" ] && envargs+=("WG_HOST=$WG_HOST")
+    [ -n "${WG_ENGINE+x}" ] && envargs+=("WG_ENGINE=$WG_ENGINE")
     exec sudo env "${envargs[@]}" bash "$SELF" "$@"
   fi
 fi
@@ -185,6 +186,40 @@ ensure_port() { # $1 = имя переменной, $2 = tcp|udp, $3 = дефо�
 ensure_port WG_PORT udp 51820
 ensure_port PANEL_PORT tcp 8080
 
+# --- Движок туннеля: новые установки идут на AmneziaWG -----------------------
+# Ванильный WireGuard узнаётся по сигнатуре (в России этим занимаются ТСПУ),
+# AmneziaWG маскирует рукопожатие. Новые установки поднимаем сразу на нём.
+# Существующие НЕ трогаем: смена движка требует перевыдачи всех клиентских
+# конфигов — молча ломать работающую установку нельзя (см. README).
+
+ensure_engine() {
+  env_has WG_ENGINE && return 0 # выбор уже зафиксирован — не трогаем
+  if [ -n "$(docker ps -aq -f 'name=^wiredeck$' 2>/dev/null || true)" ]; then
+    return 0 # контейнер уже есть: это обновление, движок оставляем прежним
+  fi
+  local want="${WG_ENGINE:-awg}"
+  case "$want" in
+    wg | awg) ;;
+    *)
+      warn "Неизвестное значение WG_ENGINE=$want — использую awg."
+      want=awg
+      ;;
+  esac
+  if printf 'WG_ENGINE=%s\n' "$want" >> "$ENV_FILE" 2>/dev/null; then
+    if [ "$want" = awg ]; then
+      info "Движок туннеля: AmneziaWG (маскировка от DPI) — зафиксировал WG_ENGINE=awg в deploy/.env."
+      info "Клиентам понадобится приложение AmneziaVPN — официальный клиент WireGuard такие конфиги не открывает."
+    else
+      info "Зафиксировал WG_ENGINE=wg в deploy/.env (обычный WireGuard)."
+    fi
+  else
+    warn "Не удалось дописать WG_ENGINE в deploy/.env (права?) — движок не зафиксирован."
+  fi
+  return 0
+}
+
+ensure_engine
+
 # Порты для проверок и итогового вывода: из окружения либо deploy/.env
 # (compose читает те же значения — источники должны совпадать).
 env_val() {
@@ -200,6 +235,7 @@ env_val() {
 }
 PANEL_PORT="$(env_val PANEL_PORT 8080)"
 WG_UDP_PORT="$(env_val WG_PORT 51820)"
+WG_ENGINE_ACTIVE="$(env_val WG_ENGINE wg)"
 
 # --- сборка и запуск ---------------------------------------------------------
 
@@ -242,6 +278,15 @@ if [ -z "$auth_status" ] || printf '%s' "$auth_status" | grep -q '"needsSetup":t
   echo "  ${c_yellow}Пока пароль не задан, это может сделать любой, кто дотянется до порта ${PANEL_PORT}.${c_reset}"
 else
   echo "  Пароль администратора уже задан — просто войдите."
+fi
+echo
+if [ "$WG_ENGINE_ACTIVE" = "awg" ]; then
+  echo "  Движок туннеля: ${c_green}AmneziaWG${c_reset} — трафик маскируется от DPI."
+  echo "  ${c_yellow}Клиентам нужно приложение AmneziaVPN: https://amnezia.org/${c_reset}"
+  echo "  ${c_yellow}Официальное приложение WireGuard эти конфиги не откроет.${c_reset}"
+else
+  echo "  Движок туннеля: обычный WireGuard (клиентам подойдёт официальное приложение)."
+  echo "  Если провайдер режет WireGuard — см. README, раздел «Обход блокировок»."
 fi
 echo
 echo "  Не забудьте открыть порты в firewall:"

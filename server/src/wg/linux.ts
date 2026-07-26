@@ -1,6 +1,10 @@
 // Реальный WireGuard-runner для Linux: wg-quick для подъёма интерфейса,
 // wg syncconf — для применения изменений пиров без разрыва соединений.
 // Все внешние команды — строго через execFile (никаких shell-строк).
+//
+// При WG_ENGINE=awg вместо wg/wg-quick вызываются awg/awg-quick из
+// amneziawg-tools: CLI и формат `show <iface> dump` у них идентичны, поэтому
+// отличается только имя бинарника и дополнительные строки [Interface].
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -9,6 +13,7 @@ import path from 'node:path';
 import type { Config } from '../config.js';
 import type { PeerStats, ServerWgState } from '../types.js';
 import type { WgRunner } from './runner.js';
+import { awgConfigLines } from '../awg.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -100,7 +105,7 @@ export class LinuxRunner implements WgRunner {
       return;
     }
     await this.writeQuickConf(state);
-    await run('wg-quick', ['up', this.confPath()]);
+    await run(this.cfg.wgQuickBin, ['up', this.confPath()]);
     console.log(`[wg] интерфейс ${state.iface} поднят, пиров: ${state.peers.length}`);
   }
 
@@ -116,12 +121,12 @@ export class LinuxRunner implements WgRunner {
     // Ошибку НЕ глотаем: поллер по контракту пропускает тик при исключении,
     // сохраняя базовые точки дельт. Пустой массив он трактует как «пиров нет»
     // и сбрасывает базовые точки — трафик с последнего успешного замера терялся бы.
-    return parseDump(await run('wg', ['show', this.iface, 'dump']));
+    return parseDump(await run(this.cfg.wgBin, ['show', this.iface, 'dump']));
   }
 
   async down(): Promise<void> {
     try {
-      await run('wg-quick', ['down', this.confPath()]);
+      await run(this.cfg.wgQuickBin, ['down', this.confPath()]);
       console.log(`[wg] интерфейс ${this.iface} погашен`);
     } catch (e) {
       // Ошибки down() глотаем: интерфейс мог быть уже погашен.
@@ -163,6 +168,10 @@ export class LinuxRunner implements WgRunner {
     ];
     if (state.mtu) lines.push(`MTU = ${state.mtu}`);
     lines.push(`PostUp = ${fw('A')}`, `PostDown = ${fw('D')}`);
+    // awg-quick сам обрабатывает Address/MTU/DNS/Table/Pre*/Post*/SaveConfig,
+    // а всё остальное из [Interface] отдаёт в `awg setconf` — параметры
+    // обфускации попадают в устройство именно так.
+    if (state.awg) lines.push(...awgConfigLines(state.awg));
     for (const p of state.peers) {
       lines.push(
         '',
@@ -191,6 +200,10 @@ export class LinuxRunner implements WgRunner {
       `PrivateKey = ${state.privateKey}`,
       `ListenPort = ${state.listenPort}`,
     ];
+    // КРИТИЧНО: параметры обфускации обязаны быть и здесь. syncconf применяет
+    // конфиг целиком, и без этих строк awg сбросил бы обфускацию на дефолт —
+    // все клиенты отвалились бы при первом же добавлении пользователя.
+    if (state.awg) lines.push(...awgConfigLines(state.awg));
     for (const p of state.peers) {
       lines.push(
         '',
@@ -202,7 +215,7 @@ export class LinuxRunner implements WgRunner {
     }
     await writeFile600(tmp, lines.join('\n') + '\n');
     try {
-      await run('wg', ['syncconf', state.iface, tmp]);
+      await run(this.cfg.wgBin, ['syncconf', state.iface, tmp]);
     } finally {
       await fs.unlink(tmp).catch(() => {});
     }

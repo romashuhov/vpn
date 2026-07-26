@@ -10,5 +10,10 @@ export function createRunner(cfg: Config): WgRunner {
     console.log('[wg] mock-режим: WireGuard не используется, трафик симулируется');
     return new MockRunner();
   }
+  console.log(
+    cfg.engine === 'awg'
+      ? `[wg] движок: AmneziaWG (${cfg.wgBin}/${cfg.wgQuickBin}), обфускация включена`
+      : `[wg] движок: WireGuard (${cfg.wgBin}/${cfg.wgQuickBin})`,
+  );
   return new LinuxRunner(cfg);
 }

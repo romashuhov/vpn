@@ -26,7 +26,51 @@ const mock =
     ? mockEnv === '1' || mockEnv === 'true'
     : os.platform() !== 'linux';
 
+/**
+ * Движок туннеля. 'wg' — ванильный WireGuard (дефолт, сохраняет поведение
+ * существующих установок), 'awg' — AmneziaWG (обфускация против DPI).
+ * Смена движка требует перевыдачи ВСЕХ клиентских конфигов, поэтому дефолт
+ * менять нельзя: новые установки включают awg явно через deploy/.env.
+ */
+function readEngine(): 'wg' | 'awg' {
+  const raw = env('WG_ENGINE', 'wg').trim().toLowerCase();
+  if (raw === 'wg' || raw === 'awg') return raw;
+  console.warn(`[wg] Неизвестное значение WG_ENGINE="${raw}" — использую 'wg'. Допустимо: wg | awg.`);
+  return 'wg';
+}
+
+const engine = readEngine();
+
+/**
+ * Сырое (нераспарсенное) значение env-переопределения параметра обфускации.
+ * Валидацию и разбор делает awg.ts — там же формируются понятные сообщения
+ * об ошибках, для которых нужна исходная строка.
+ */
+function awgEnvValue(name: string): string | undefined {
+  const v = process.env[name];
+  if (v === undefined) return undefined;
+  const t = v.trim();
+  return t === '' ? undefined : t;
+}
+
 export const config = {
+  engine,
+  // Производные имена бинарников: у awg-tools тот же CLI, что у wireguard-tools.
+  wgBin: engine === 'awg' ? 'awg' : 'wg',
+  wgQuickBin: engine === 'awg' ? 'awg-quick' : 'wg-quick',
+  // Переопределения параметров обфускации из env (undefined = не задано).
+  // Приоритетнее значений из БД и в БД не сохраняются.
+  awgEnv: {
+    jc: awgEnvValue('AWG_JC'),
+    jmin: awgEnvValue('AWG_JMIN'),
+    jmax: awgEnvValue('AWG_JMAX'),
+    s1: awgEnvValue('AWG_S1'),
+    s2: awgEnvValue('AWG_S2'),
+    h1: awgEnvValue('AWG_H1'),
+    h2: awgEnvValue('AWG_H2'),
+    h3: awgEnvValue('AWG_H3'),
+    h4: awgEnvValue('AWG_H4'),
+  },
   port: Number(env('PORT', '8080')),
   host: env('HOST', '0.0.0.0'),
   dataDir,

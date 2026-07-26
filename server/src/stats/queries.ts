@@ -95,6 +95,7 @@ export function overview(cfg: Config): OverviewDTO {
       subnet: cfg.wg.subnet,
       iface: cfg.wg.iface,
       mock: cfg.wg.mock,
+      engine: cfg.engine,
     },
   };
 }

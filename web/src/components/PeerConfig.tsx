@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as QRCode from 'qrcode';
-import { Check, Copy, Download, Loader2 } from 'lucide-react';
+import { Check, Copy, Download, Loader2, TriangleAlert } from 'lucide-react';
 import { api } from '../lib/api';
+import type { WgEngine } from '../lib/types';
 
 interface Props {
   userId: number;
@@ -14,6 +15,44 @@ function confFileName(userName: string, userId: number): string {
   return `${safe || `wg-client-${userId}`}.conf`;
 }
 
+// Движок туннеля меняется только рестартом сервера — тянем один раз на вкладку
+// и делим промис между всеми PeerConfig (их на странице может быть несколько).
+// Ошибка — молча 'wg' (QR важнее предупреждения) + сброс кэша, чтобы следующее
+// монтирование переспросило.
+let enginePromise: Promise<WgEngine> | null = null;
+
+function loadEngine(): Promise<WgEngine> {
+  if (!enginePromise) {
+    enginePromise = api.overview().then(
+      (o) => (o.server.engine === 'awg' ? 'awg' : 'wg'),
+      () => {
+        enginePromise = null;
+        return 'wg' as WgEngine;
+      },
+    );
+  }
+  return enginePromise;
+}
+
+/** Конфиг AmneziaWG не открывается официальным клиентом WireGuard — предупреждаем заранее. */
+function AmneziaNotice() {
+  return (
+    <div className="flex w-full items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-left text-amber-400">
+      <TriangleAlert size={16} className="mt-0.5 shrink-0" />
+      <div className="min-w-0 space-y-1 text-xs leading-relaxed">
+        <p className="text-sm font-medium">Нужно приложение AmneziaVPN</p>
+        <p className="text-amber-400/80">
+          Конфиг использует AmneziaWG (WireGuard с обфускацией) — официальное приложение
+          WireGuard его <span className="font-medium">не откроет</span>. Установите AmneziaVPN
+          для Android, iOS, Windows или macOS, затем импортируйте файл или отсканируйте
+          QR-код.
+        </p>
+        <p className="font-medium break-all select-all text-amber-300">https://amnezia.org/</p>
+      </div>
+    </div>
+  );
+}
+
 /** Конфиг пира: QR-код + кнопки «Скачать .conf» и «Скопировать». */
 export default function PeerConfig({ userId, userName }: Props) {
   const [config, setConfig] = useState<string | null>(null);
@@ -23,7 +62,18 @@ export default function PeerConfig({ userId, userName }: Props) {
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  const [engine, setEngine] = useState<WgEngine>('wg');
   const copyTimer = useRef<number | undefined>(undefined);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadEngine().then((e) => {
+      if (!cancelled) setEngine(e);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -142,10 +192,12 @@ export default function PeerConfig({ userId, userName }: Props) {
 
   return (
     <div className="flex flex-col items-center gap-4">
+      {engine === 'awg' && <AmneziaNotice />}
+
       {qr ? (
         <img
           src={qr}
-          alt={`QR-код конфигурации WireGuard для ${userName}`}
+          alt={`QR-код конфигурации ${engine === 'awg' ? 'AmneziaWG' : 'WireGuard'} для ${userName}`}
           width={260}
           height={260}
           className="rounded-lg bg-white p-1"

@@ -29,6 +29,23 @@ export interface WgPeer {
   allowedIps: string; // '10.8.0.x/32'
 }
 
+/**
+ * Параметры обфускации AmneziaWG (набор AWG 1.5).
+ * S1, S2, H1..H4 обязаны совпадать на сервере и клиенте — иначе связи не будет.
+ * Jc/Jmin/Jmax совпадать не обязаны (это лишь объём мусорных пакетов).
+ */
+export interface AwgParams {
+  jc: number; // кол-во мусорных пакетов перед хендшейком, 1..128
+  jmin: number; // мин. размер мусорного пакета, 0 <= jmin < jmax
+  jmax: number; // макс. размер мусорного пакета, < 1280
+  s1: number; // случайный префикс init-пакета, 0..1132; обязательно s1 + 56 != s2
+  s2: number; // случайный префикс response-пакета, 0..1188
+  h1: number; // magic-заголовок init, 5..2147483647
+  h2: number; // magic-заголовок response
+  h3: number; // magic-заголовок underload
+  h4: number; // magic-заголовок transport (все четыре обязаны различаться)
+}
+
 export interface ServerWgState {
   iface: string;
   privateKey: string;
@@ -36,6 +53,8 @@ export interface ServerWgState {
   listenPort: number;
   mtu?: string;
   peers: WgPeer[];
+  /** Задано только при движке 'awg'; в режиме 'wg' поле отсутствует. */
+  awg?: AwgParams;
 }
 
 // ---- DTO для REST API ----
@@ -60,6 +79,7 @@ export interface ServerInfo {
   subnet: string;
   iface: string;
   mock: boolean;
+  engine: 'wg' | 'awg'; // движок туннеля: ванильный WireGuard или AmneziaWG
 }
 
 export interface OverviewDTO {

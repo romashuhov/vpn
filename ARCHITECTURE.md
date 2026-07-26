@@ -15,8 +15,33 @@ WireGuard-интерфейс, управляет пирами (юзерами), 
 - **web/**: React 19, Vite, TypeScript, Tailwind CSS v4 (`@tailwindcss/vite`),
   react-router-dom 7, recharts 2, qrcode, lucide-react.
 - npm workspaces: корневой package.json → `server`, `web`.
-- Прод: Docker (node:24-alpine + wireguard-tools), либо bare-metal Linux.
+- Прод: Docker (node:24-alpine + wireguard-tools + amneziawg-tools/amneziawg-go),
+  либо bare-metal Linux.
 - Dev на Windows/Mac: автоматический mock-режим WireGuard (см. ниже).
+
+## Два движка туннеля
+
+`WG_ENGINE` выбирает реализацию: `wg` (дефолт) — ванильный WireGuard, `awg` —
+**AmneziaWG**, форк с обфускацией против сигнатурного DPI. Отличия строго
+локализованы:
+
+- бинарники: `wg`/`wg-quick` → `awg`/`awg-quick` (тот же CLI, тот же формат
+  `show <iface> dump` — парсер статистики общий);
+- в секции `[Interface]` серверного и клиентского конфигов добавляются параметры
+  обфускации `Jc/Jmin/Jmax`, `S1/S2`, `H1…H4` (набор AWG 1.5).
+
+В режиме `wg` поведение обязано остаться ровно прежним: никаких AWG-строк в
+конфигах, никаких вызовов `awg*`. Дефолт `wg` намеренный — молчаливая смена
+движка на существующей установке потребовала бы перевыдачи всех клиентских
+конфигов. Новые установки переводит на `awg` `start.sh` (дописывает
+`WG_ENGINE=awg` в `deploy/.env`, если строки нет и контейнера `wiredeck` ещё
+не существует — тот же приём, что и автоподбор портов).
+
+Параметры AWG 2.0 (`S3/S4`, `I1…I5`, `Itime`) **не реализуем**: они требуют
+ручного подбора и совместимого клиента. Возможное развитие, не обязательство.
+
+Mock-режим движок игнорирует (никаких бинарников), но в DTO и UI движок
+отражается честно.
 
 ## Раскладка файлов и владельцы
 
@@ -27,6 +52,7 @@ server/
   src/
     config.ts        — каркас (готово): env-конфиг
     types.ts         — каркас (готово): общие типы
+    awg.ts           — агент wg: параметры обфускации AmneziaWG (генерация, БД, env)
     ipam.ts          — агент wg: выделение IP в подсети
     wg/
       runner.ts      — каркас (готово): интерфейс WgRunner
@@ -80,10 +106,21 @@ README.md                                          — агент deploy (на �
 | `WG_ALLOWED_IPS` | `0.0.0.0/0, ::/0` | AllowedIPs в клиентском конфиге |
 | `WG_PERSISTENT_KEEPALIVE` | `25` | keepalive клиента |
 | `WG_MTU` | `1280` | консервативный дефолт против PMTU-blackhole; `off`/`0` = не указывать |
+| `WG_ENGINE` | `wg` | Движок туннеля: `wg` \| `awg` (AmneziaWG). Любое другое значение → `wg` + warning |
+| `AWG_JC` | из БД | Кол-во мусорных пакетов, 1..128 (генерим 4..12) |
+| `AWG_JMIN` / `AWG_JMAX` | из БД | Размеры мусорных пакетов: `0 <= Jmin < Jmax < 1280` (генерим ~50 / ~1000) |
+| `AWG_S1` / `AWG_S2` | из БД | Префиксы Init/Response: `S1` 0..1132, `S2` 0..1188, обязательно `S1 + 56 != S2` |
+| `AWG_H1`…`AWG_H4` | из БД | Magic-заголовки, 5..2147483647, все четыре различны |
 | `WG_MOCK` | авто | `1`/`true` — мок; по умолчанию мок везде, кроме linux |
 | `WG_MOCK_SEED` | `1` в мок-режиме | Засеять демо-юзеров и историю трафика |
 | `POLL_INTERVAL_MS` | `15000` | Период опроса статистики |
 | `WEB_DIST` | `../../web/dist` от dist/ | Путь к собранной SPA |
+
+`AWG_*` — аварийные переопределения (env имеет приоритет над БД); нормальный
+путь — автогенерация при первом запуске. Значения обязаны быть стабильными:
+`S1`, `S2`, `H1…H4` должны совпадать у сервера и клиента, иначе связи нет
+(`Jc/Jmin/Jmax` совпадать не обязаны, но переизданный конфиг всё равно
+рендерится из одних и тех же сохранённых значений).
 
 Экспорт: `export const config` (см. файл), `export type Config`.
 
@@ -115,7 +152,9 @@ CREATE TABLE IF NOT EXISTS traffic_hourly(
 ```
 
 Ключи `settings`: `admin_password_hash` (`<salt_hex>:<scrypt_hex>`),
-`server_private_key`, `server_public_key`.
+`server_private_key`, `server_public_key`, параметры обфускации AmneziaWG —
+`awg_jc`, `awg_jmin`, `awg_jmax`, `awg_s1`, `awg_s2`, `awg_h1`…`awg_h4`
+(значения — десятичные числа строкой; пишутся один раз и не переписываются).
 
 Направление трафика: **rx/tx с точки зрения сервера** (как в `wg show dump`):
 `rx` = получено от клиента (его upload), `tx` = отправлено клиенту (его download).
@@ -129,8 +168,11 @@ UserRow { id, name, privateKey, publicKey, presharedKey, address, enabled,
           totalRx, totalTx, lastHandshake: number|null, createdAt, updatedAt }
 PeerStats { publicKey, endpoint: string|null, lastHandshake: number|null, rx, tx }
 WgPeer { publicKey, presharedKey, allowedIps }        // allowedIps = '10.8.0.x/32'
-ServerWgState { iface, privateKey, address /* '10.8.0.1/24' */, listenPort, mtu?, peers: WgPeer[] }
+AwgParams { jc, jmin, jmax, s1, s2, h1, h2, h3, h4 }  // всё number
+ServerWgState { iface, privateKey, address /* '10.8.0.1/24' */, listenPort, mtu?,
+                peers: WgPeer[], awg?: AwgParams }    // awg задан ⇔ WG_ENGINE=awg
 UserDTO, OverviewDTO, TimeseriesPoint, UserUsage, OnlineUserDTO, Range — DTO для API (см. файл)
+ServerInfo { host, port, publicKey, subnet, iface, mock, engine: 'wg' | 'awg' }
 ```
 
 ### server/src/wg/runner.ts (готово)
@@ -155,6 +197,18 @@ export function genPresharedKey(): string
 // pub  = publicKey.export({type:'spki',format:'der'}).subarray(-32).toString('base64')
 // preshared = randomBytes(32).toString('base64')
 
+// awg.ts — параметры обфускации AmneziaWG; вызывать только при engine === 'awg'
+export type { AwgParams } from './types.js'
+export function getAwgParams(cfg: Config): AwgParams   // после openDb(); кэш на процесс
+// Порядок для каждого параметра: env AWG_* → settings (awg_*) → сгенерировать.
+// Сгенерированное сразу сохраняется в settings и больше не меняется.
+// Валидация диапазонов из таблицы env + инварианты: S1+56 != S2, H1..H4 попарно
+// различны. Невалидное значение из env — warning в лог и фолбэк на БД/генерацию.
+export function awgConfigLines(p: AwgParams): string[]
+// Строки для секции [Interface] в порядке Jc, Jmin, Jmax, S1, S2, H1..H4 —
+// одинаковые для серверного и клиентского конфига.
+export function resetAwgParamsCache(): void            // только для тестов
+
 // ipam.ts
 export function serverAddress(subnet: string): string          // '10.8.0.0/24' -> '10.8.0.1'
 export function subnetPrefix(subnet: string): number           // -> 24
@@ -163,8 +217,10 @@ export function nextFreeAddress(subnet: string, taken: string[]): string  // с�
 // wg/confgen.ts
 export function buildServerState(cfg: Config, serverPrivateKey: string, users: UserRow[]): ServerWgState
 // peers — только enabled-юзеры
+// при cfg.engine === 'awg' в state кладётся awg: getAwgParams(cfg)
 export function renderClientConfig(cfg: Config, serverPublicKey: string, user: UserRow): string
 // [Interface] PrivateKey, Address = <ip>/<prefix подсети>, DNS
+//             + при engine 'awg' — строки awgConfigLines(getAwgParams(cfg))
 // [Peer] PublicKey=<server>, PresharedKey, Endpoint=<WG_HOST>:<WG_PORT>,
 //        AllowedIPs=<WG_ALLOWED_IPS>, PersistentKeepalive
 
@@ -182,6 +238,17 @@ fallback `eth0`; плюс FORWARD accept для %i). `up()`: если `ip link s
 табы-разделители; строки пиров: `public_key preshared_key endpoint allowed_ips
 latest_handshake(unix sec, 0 = никогда) transfer_rx transfer_tx keepalive`.
 `down()`: `wg-quick down <путь>`, ошибки глотать.
+
+При `WG_ENGINE=awg` тот же алгоритм, но бинарники — `awg-quick`/`awg` (CLI и
+формат `dump` идентичны, парсер статистики общий), а в `[Interface]` серверного
+конфига дописываются строки `awgConfigLines(state.awg)`. Те же строки идут и в
+**awg-нативный** конфиг для `awg syncconf`: парсер `config.c` у форка понимает
+`Jc/Jmin/Jmax/S1/S2/H1..H4` в секции интерфейса, а повторная отправка тех же
+значений — no-op (зато интерфейс гарантированно не останется без обфускации).
+В контейнере модуля ядра нет: `awg-quick` сам падает в userspace и запускает
+`amneziawg-go` (переменная `WG_QUICK_USERSPACE_IMPLEMENTATION` у форка та же,
+дефолт — `amneziawg-go`, так что задавать её не нужно, достаточно бинарника в
+PATH). Userspace-реализации нужен `/dev/net/tun` — см. деплой.
 
 **mock.ts**: держит state в памяти. Симуляция: у каждого enabled-пира с шансом
 ~60% «онлайн-сессия» (включается/выключается случайно раз в несколько минут);
@@ -228,7 +295,7 @@ export function overview(cfg: Config): OverviewDTO
 // usersTotal, usersOnline (last_handshake > now-180s), rxToday/txToday (sum
 // traffic_hourly с начала локального дня), rxTotal/txTotal (sum users.total_*),
 // server: { host: cfg.wg.host, port, publicKey: getSetting('server_public_key') ?? '',
-//           subnet, iface, mock: cfg.wg.mock }
+//           subnet, iface, mock: cfg.wg.mock, engine: cfg.engine }
 export function timeseries(range: Range, userId?: number): TimeseriesPoint[]
 // 24h → 24 часовых точек, 7d → 168 часовых, 30d → 30 дневных (агрегация по дням).
 // Пустые интервалы заполнять нулями (непрерывный ряд). ts = начало интервала, unix ms.
@@ -323,6 +390,10 @@ SPA на русском. `web/src/lib/api.ts` (готово) — единств�
 // components/PeerConfig.tsx — props: { userId: number; userName: string }
 // Сам грузит текст конфига через api.getUserConfig, показывает: QR-код (библиотека
 // qrcode, toDataURL, размер ~260px), кнопки «Скачать .conf» (Blob) и «Скопировать».
+// При server.engine === 'awg' (api.overview(), промис кэшируется на модуль,
+// ошибки молча → 'wg') над QR — амбер-плашка: конфиг открывается только
+// приложением AmneziaVPN (https://amnezia.org/), официальный клиент WireGuard
+// его не поймёт.
 
 // pages/Login.tsx — props: { needsSetup: boolean; onSuccess: () => void }
 // Центрированная карточка. needsSetup=true → «Придумайте пароль администратора»
@@ -336,6 +407,8 @@ SPA на русском. `web/src/lib/api.ts` (готово) — единств�
 
 // pages/Dashboard.tsx — 4 стат-карточки (юзеров всего / онлайн, трафик сегодня
 // ↓+↑, трафик за всё время), переключатель периода 24ч/7д/30д, area-график.
+// В карточке «Сервер» под строкой «<iface> · <подсеть>» — sky-бейдж «AmneziaWG»
+// (по образцу амбер-бейджа «демо-режим»), когда server.engine === 'awg'.
 // В карточке «Пользователи» под счётчиком онлайна — мини-список онлайн-юзеров
 // (api.onlineUsers, поллинг каждые 10 сек): точка, имя, «↓ X/с · ↑ Y/с» мелким
 // текстом; высота ~5 строк, при большем количестве — вертикальный скролл;
@@ -370,15 +443,22 @@ text-slate-950 font-medium`, ссылки/активная навигация `t
   wireguard-tools iptables ip6tables bash iproute2` — прод-зависимости server
   (`npm ci --omit=dev -w server`), копия dist-ов с сохранением раскладки
   (`/app/server/dist`, `/app/web/dist`, node_modules), `ENV DATA_DIR=/data`,
-  `CMD ["node","/app/server/dist/index.js"]`.
+  `CMD ["node","/app/server/dist/index.js"]`. Плюс AmneziaWG: `awg`, `awg-quick`
+  (amneziawg-tools) и userspace-демон `amneziawg-go` — в Alpine-репозиториях их
+  нет, собираются отдельным стейджем и копируются в `/usr/bin`. Оба движка
+  живут в образе одновременно, выбор — рантаймовый (`WG_ENGINE`).
 - **deploy/docker-compose.yml**: build context `..`, `cap_add: NET_ADMIN`,
   sysctls `net.ipv4.ip_forward=1`, `net.ipv4.conf.all.src_valid_mark=1`,
   ports `${WG_PORT:-51820}/udp` и `${PANEL_PORT:-8080}:8080`, volume `wiredeck_data:/data`,
-  env `WG_HOST` (обязателен), restart unless-stopped.
+  `devices: /dev/net/tun:/dev/net/tun` (нужен userspace-реализации AmneziaWG),
+  env `WG_HOST` (обязателен), `WG_ENGINE`, `AWG_*`, restart unless-stopped.
 - **Management-скрипты в корне** (основной способ управления): `start.sh` —
   первичная настройка и запуск (проверка/установка Docker с ожиданием dpkg-lock,
   WG_HOST → deploy/.env, автоподбор свободных портов при первой установке
-  (+1 от дефолта, фиксируются в .env), compose up, в конце URL панели; пароль
+  (+1 от дефолта, фиксируются в .env), `ensure_engine` — при первичной установке
+  (нет строки `WG_ENGINE` в .env И нет контейнера `wiredeck`) дописывает
+  `WG_ENGINE=awg`, существующие установки не трогает; compose up, в конце URL
+  панели и напоминание про приложение AmneziaVPN, если движок `awg`; пароль
   администратора задаётся в веб-панели при первом входе), `restart.sh` (down+up, применяет .env), `update.sh`
   (git pull + пересборка, только если задеплоен не текущий коммит — метка
   deploy/.deployed), `logs.sh`, `stop.sh` (volume сохраняется), `uninstall.sh`

@@ -18,7 +18,11 @@ services:
     container_name: wiredeck
     restart: unless-stopped
     # Минимальный набор capabilities: NET_ADMIN — wg/ip, NET_RAW — iptables.
-    # Остальные дефолтные capabilities Docker процессу не нужны.
+    # Он же покрывает движок awg: userspace-демон amneziawg-go создаёт TUN
+    # через ioctl(TUNSETIFF), а это тоже CAP_NET_ADMIN. Дополнительных
+    # capabilities для /dev/net/tun не нужно — доступ к самому символьному
+    # устройству регулируется не capabilities, а device cgroup (секция
+    # devices ниже) и правами на узел (crw-rw-rw-, процесс работает от root).
     cap_add:
       - NET_ADMIN
       - NET_RAW
@@ -26,6 +30,12 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    devices:
+      # Нужно движку WG_ENGINE=awg: userspace-реализация AmneziaWG поднимает
+      # интерфейс через /dev/net/tun (модуля ядра amneziawg в контейнере нет).
+      # Если на хосте узла нет — контейнер не стартует; лечится загрузкой
+      # модуля: `modprobe tun` и строка `tun` в /etc/modules-load.d/tun.conf.
+      - /dev/net/tun:/dev/net/tun
     sysctls:
       - net.ipv4.ip_forward=1
       - net.ipv4.conf.all.src_valid_mark=1
@@ -47,6 +57,25 @@ services:
       WG_ALLOWED_IPS: ${WG_ALLOWED_IPS:-}
       WG_PERSISTENT_KEEPALIVE: ${WG_PERSISTENT_KEEPALIVE:-}
       WG_MTU: ${WG_MTU:-}
+      # Движок туннеля: wg (ванильный WireGuard, дефолт) | awg (AmneziaWG с
+      # обфускацией против DPI). Для новых установок start.sh прописывает
+      # WG_ENGINE=awg в .env. МЕНЯТЬ У РАБОТАЮЩЕЙ УСТАНОВКИ НЕЛЬЗЯ без
+      # перевыдачи всех клиентских конфигов — движки несовместимы.
+      WG_ENGINE: ${WG_ENGINE:-}
+      # Параметры обфускации AmneziaWG (набор AWG 1.5). Пустое значение =
+      # взять из БД (settings), где они сгенерированы один раз при первом
+      # запуске в режиме awg. Задавать здесь имеет смысл только чтобы
+      # воспроизвести конкретный набор — значения обязаны совпадать с теми,
+      # что зашиты в уже выданные клиентские конфиги.
+      AWG_JC: ${AWG_JC:-}
+      AWG_JMIN: ${AWG_JMIN:-}
+      AWG_JMAX: ${AWG_JMAX:-}
+      AWG_S1: ${AWG_S1:-}
+      AWG_S2: ${AWG_S2:-}
+      AWG_H1: ${AWG_H1:-}
+      AWG_H2: ${AWG_H2:-}
+      AWG_H3: ${AWG_H3:-}
+      AWG_H4: ${AWG_H4:-}
       # COOKIE_SECURE=1 — флаг Secure на cookie сессии (панель за TLS-прокси).
       COOKIE_SECURE: ${COOKIE_SECURE:-}
       POLL_INTERVAL_MS: ${POLL_INTERVAL_MS:-}

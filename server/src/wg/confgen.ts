@@ -3,6 +3,7 @@
 import type { Config } from '../config.js';
 import type { ServerWgState, UserRow, WgPeer } from '../types.js';
 import { serverAddress, subnetPrefix } from '../ipam.js';
+import { awgConfigLines, getAwgParams } from '../awg.js';
 
 /**
  * Имя юзера попадает в комментарий conf-файла — вырезаем переводы строк и
@@ -43,6 +44,8 @@ export function buildServerState(
     peers,
   };
   if (cfg.wg.mtu !== '') state.mtu = cfg.wg.mtu;
+  // Движок 'wg' обязан давать ровно прежний результат — поле не появляется вовсе.
+  if (cfg.engine === 'awg') state.awg = getAwgParams(cfg);
   return state;
 }
 
@@ -61,6 +64,9 @@ export function renderClientConfig(
     `DNS = ${cfg.wg.dns}`,
   ];
   if (cfg.wg.mtu !== '') lines.push(`MTU = ${cfg.wg.mtu}`);
+  // AmneziaWG: S1/S2/H1..H4 обязаны совпадать с серверными, иначе связи не будет.
+  // Такой конфиг открывается только клиентами AmneziaVPN / AmneziaWG.
+  if (cfg.engine === 'awg') lines.push(...awgConfigLines(getAwgParams(cfg)));
   lines.push(
     '',
     '[Peer]',

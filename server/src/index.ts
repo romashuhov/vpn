@@ -9,6 +9,7 @@ import fastifyCookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
 import { config } from './config.js';
 import { getSetting, listUsers, openDb, setSetting } from './db.js';
+import { getAwgParams } from './awg.js';
 import { maybeSeedDemo } from './seed.js';
 import { genKeypair } from './wg/keys.js';
 import { buildServerState } from './wg/confgen.js';
@@ -37,13 +38,32 @@ async function main(): Promise<void> {
     throw new Error('Не удалось прочитать server_private_key из настроек');
   }
 
+  // 2a. Параметры обфускации AmneziaWG — инициализируем ДО первого
+  // buildServerState, чтобы серверный и клиентские конфиги видели одни и те же
+  // значения (генерация происходит один раз и сохраняется в settings).
+  if (config.engine === 'awg') {
+    const p = getAwgParams(config);
+    console.log(
+      `[awg] Параметры обфускации: Jc=${p.jc} Jmin=${p.jmin} Jmax=${p.jmax} ` +
+        `S1=${p.s1} S2=${p.s2} H1..H4 заданы`,
+    );
+  }
+
   if (config.wg.mock) {
     console.log('[wg] Мок-режим WireGuard: реальный интерфейс не поднимается');
-  } else if (config.wg.host === '') {
-    console.warn(
-      '[wg] ВНИМАНИЕ: WG_HOST не задан — клиентские конфиги будут без корректного Endpoint. ' +
-        'Задайте WG_HOST=<публичный IP или домен сервера>.',
+  } else {
+    console.log(
+      config.engine === 'awg'
+        ? '[wg] Движок туннеля: AmneziaWG (WG_ENGINE=awg). Клиентские конфиги открываются ' +
+            'только приложениями AmneziaVPN / AmneziaWG, официальный WireGuard их не примет.'
+        : '[wg] Движок туннеля: WireGuard (WG_ENGINE=wg)',
     );
+    if (config.wg.host === '') {
+      console.warn(
+        '[wg] ВНИМАНИЕ: WG_HOST не задан — клиентские конфиги будут без корректного Endpoint. ' +
+          'Задайте WG_HOST=<публичный IP или домен сервера>.',
+      );
+    }
   }
 
   // 3. Демо-данные (только мок-режим и пустая БД)
