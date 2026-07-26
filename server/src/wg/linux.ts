@@ -142,11 +142,17 @@ export class LinuxRunner implements WgRunner {
   private async writeQuickConf(state: ServerWgState): Promise<void> {
     const egress = await detectEgressIface();
     const subnet = this.cfg.wg.subnet;
+    // MSS-clamping обязателен: без него TCP внутри туннеля договаривается о
+    // полноразмерных сегментах, а полноразмерные внешние UDP-пакеты дропаются
+    // на путях с уменьшенным MTU и фильтрованным ICMP (мобильные сети, CGNAT) —
+    // симптом «подключается, но не грузит / периодически висит».
     const fw = (act: 'A' | 'D'): string =>
       [
         `iptables -t nat -${act} POSTROUTING -s ${subnet} -o ${egress} -j MASQUERADE`,
         `iptables -${act} FORWARD -i %i -j ACCEPT`,
         `iptables -${act} FORWARD -o %i -j ACCEPT`,
+        `iptables -t mangle -${act} FORWARD -i %i -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu`,
+        `iptables -t mangle -${act} FORWARD -o %i -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu`,
       ].join('; ');
     const lines: string[] = [
       '# Сгенерировано WireDeck — не редактируйте вручную',
