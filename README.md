@@ -55,6 +55,7 @@ curl -fsSL https://raw.githubusercontent.com/romashuhov/vpn/main/deploy/install.
 | `./restart.sh` | перезапуск; применяет изменения `deploy/.env` |
 | `./update.sh` | `git pull` + пересборка, только если есть новые коммиты |
 | `./stop.sh` | остановка; данные остаются в volume `wiredeck_data` |
+| `./uninstall.sh` | удалить контейнер и образ; данные сохраняются (снести и их — `--purge`) |
 
 База, ключи и статистика живут в volume `wiredeck_data` и переживают
 пересоздание/пересборку контейнера.

@@ -380,7 +380,8 @@ text-slate-950 font-medium`, ссылки/активная навигация `t
   compose up, в конце URL панели; пароль администратора задаётся в веб-панели
   при первом входе), `restart.sh` (down+up, применяет .env), `update.sh`
   (git pull + пересборка, только если задеплоен не текущий коммит — метка
-  deploy/.deployed), `logs.sh`, `stop.sh` (volume сохраняется).
+  deploy/.deployed), `logs.sh`, `stop.sh` (volume сохраняется), `uninstall.sh`
+  (контейнер+образ; данные — только с --purge или явным y/N-подтверждением).
 - **deploy/install.sh**: тонкий бутстрап для `curl | sudo bash` на чистой
   Ubuntu/Debian: ставит git/curl, клонирует репо в /opt/wiredeck (или обновляет)
   и передаёт управление start.sh.

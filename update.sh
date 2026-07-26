@@ -12,7 +12,14 @@ dc() {
   if docker info >/dev/null 2>&1; then docker compose "$@"; return; fi
   if [ "$(id -u)" -eq 0 ]; then die "Docker-демон не отвечает. Запустите его: systemctl start docker"; fi
   command -v sudo >/dev/null 2>&1 || die "Нет доступа к Docker (нужна группа docker) и нет sudo — запустите от root."
-  sudo docker compose "$@"
+  # sudo с env_reset вычищает окружение; `env VAR=…` протаскивает переменные при необходимости.
+  local envargs=()
+  [ -n "${WG_HOST+x}" ] && envargs+=("WG_HOST=$WG_HOST")
+  sudo env "${envargs[@]}" docker compose "$@"
+}
+
+dkr() { # raw docker с тем же sudo-фоллбеком
+  if docker info >/dev/null 2>&1; then docker "$@"; else sudo docker "$@"; fi
 }
 
 [ -r "$ROOT/deploy/.env" ] || die "Нет читаемого deploy/.env — сначала запустите ./start.sh"
@@ -33,6 +40,9 @@ if [ "$head" = "$deployed" ]; then
 fi
 
 cd "$ROOT/deploy"
+# Контейнер от версий до фиксации имени compose-проекта (проект «deploy») —
+# без этого up упёрся бы в занятое имя контейнера.
+dkr rm -f wiredeck >/dev/null 2>&1 || true
 dc up -d --build
 # Метку пишем только после успешного up: если сборка упала, следующий запуск повторит её.
 git -C "$ROOT" rev-parse HEAD > "$ROOT/deploy/.deployed"

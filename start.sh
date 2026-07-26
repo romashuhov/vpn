@@ -60,7 +60,11 @@ if [ "$(id -u)" -ne 0 ]; then
     command -v sudo >/dev/null 2>&1 \
       || die "Нужны права root (установка/запуск Docker), а sudo нет. Запустите от root: bash $SELF"
     info "Нужны права root — перезапускаюсь через sudo."
-    exec sudo -E bash "$SELF" "$@"
+    # sudo с env_reset вычищает окружение — протаскиваем наши переменные через `env`.
+    envargs=()
+    [ -n "${WG_HOST+x}" ] && envargs+=("WG_HOST=$WG_HOST")
+    [ -n "${WIREDECK_YES+x}" ] && envargs+=("WIREDECK_YES=$WIREDECK_YES")
+    exec sudo env "${envargs[@]}" bash "$SELF" "$@"
   fi
 fi
 
@@ -146,6 +150,14 @@ fi
 
 info "Собираю и запускаю контейнер (первая сборка может занять несколько минут)…"
 cd "$DEPLOY"
+# Миграция со старого имени compose-проекта («deploy»): контейнер «wiredeck»
+# от старого проекта занял бы имя и не дал подняться новому. Трогаем его только
+# если в НАШЕМ проекте контейнеров нет, а имя занято.
+if [ -z "$(docker compose ps -q 2>/dev/null || true)" ] \
+  && [ -n "$(docker ps -aq -f 'name=^wiredeck$' 2>/dev/null || true)" ]; then
+  info "Убираю контейнер от старой версии (миграция имени compose-проекта)…"
+  docker rm -f wiredeck >/dev/null 2>&1 || true
+fi
 docker compose up -d --build
 
 # Метка успешно задеплоенного коммита — по ней ./update.sh решает, нужна ли пересборка.
