@@ -44,9 +44,13 @@ services:
       WG_MTU: ${WG_MTU:-}
       # COOKIE_SECURE=1 — флаг Secure на cookie сессии (панель за TLS-прокси).
       COOKIE_SECURE: ${COOKIE_SECURE:-}
+      POLL_INTERVAL_MS: ${POLL_INTERVAL_MS:-}
     volumes:
       # SQLite-база и конфиг интерфейса WireGuard — переживают пересоздание контейнера.
       - wiredeck_data:/data
 
 volumes:
   wiredeck_data:
+    # Явное имя: без него compose добавил бы префикс проекта (deploy_wiredeck_data),
+    # и имя из документации/скриптов не совпадало бы с реальным.
+    name: wiredeck_data

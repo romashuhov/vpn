@@ -375,12 +375,15 @@ text-slate-950 font-medium`, ссылки/активная навигация `t
   sysctls `net.ipv4.ip_forward=1`, `net.ipv4.conf.all.src_valid_mark=1`,
   ports `51820:51820/udp`, `8080:8080/tcp`, volume `wiredeck_data:/data`,
   env `WG_HOST` (обязателен), restart unless-stopped.
-- **deploy/install.sh**: bash, для Ubuntu/Debian VPS: проверка root, установка
-  docker при отсутствии (get.docker.com, с явным подтверждением y/n), git clone
-  репо в /opt/wiredeck (или обновление), автоопределение публичного IP
-  (`curl -4s https://api.ipify.org`, дать подтвердить/поправить), запись .env,
-  `docker compose up -d --build`, в конце — URL панели и подсказка про firewall
-  (открыть 51820/udp и 8080/tcp).
+- **Management-скрипты в корне** (основной способ управления): `start.sh` —
+  первичная настройка и запуск (проверка/установка Docker, WG_HOST → deploy/.env,
+  compose up, в конце URL панели; пароль администратора задаётся в веб-панели
+  при первом входе), `restart.sh` (down+up, применяет .env), `update.sh`
+  (git pull + пересборка, только если задеплоен не текущий коммит — метка
+  deploy/.deployed), `logs.sh`, `stop.sh` (volume сохраняется).
+- **deploy/install.sh**: тонкий бутстрап для `curl | sudo bash` на чистой
+  Ubuntu/Debian: ставит git/curl, клонирует репо в /opt/wiredeck (или обновляет)
+  и передаёт управление start.sh.
 - **README.md** (русский): что это, скриншот-плейсхолдер, быстрый старт одной
   командой, ручная установка, все env, dev-режим (`npm install && npm run dev`,
   мок-режим), архитектура кратко, безопасность (пароль, рекомендация reverse
