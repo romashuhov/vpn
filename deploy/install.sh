@@ -39,9 +39,18 @@ missing_pkgs=()
 command -v git  >/dev/null 2>&1 || missing_pkgs+=(git)
 command -v curl >/dev/null 2>&1 || missing_pkgs+=(curl)
 if [ "${#missing_pkgs[@]}" -gt 0 ]; then
+  # Свежие VPS первые минуты держат dpkg-lock фоновым unattended-upgrades — ждём.
+  waited=0
+  while { command -v fuser >/dev/null 2>&1 && fuser /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock >/dev/null 2>&1; } \
+     || { ! command -v fuser >/dev/null 2>&1 && pgrep -f 'unattended-upgr|apt-get|dpkg' >/dev/null 2>&1; }; do
+    [ "$waited" -eq 0 ] && info "Жду, пока фоновое обновление системы отпустит dpkg (обычно 1–5 минут)…"
+    sleep 5
+    waited=$((waited + 5))
+    [ "$waited" -ge 900 ] && die "dpkg занят дольше 15 минут. Посмотрите: ps aux | grep -E 'apt|dpkg'"
+  done
   info "Устанавливаю недостающие пакеты: ${missing_pkgs[*]}"
-  apt-get update -qq
-  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${missing_pkgs[@]}"
+  apt-get -o DPkg::Lock::Timeout=300 update -qq
+  DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y -qq "${missing_pkgs[@]}"
 fi
 
 if [ -d "$INSTALL_DIR/.git" ]; then

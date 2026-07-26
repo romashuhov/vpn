@@ -72,6 +72,30 @@ if [ "$(id -u)" -ne 0 ]; then
   fi
 fi
 
+# --- apt: дождаться освобождения dpkg-lock -----------------------------------
+# Свежие VPS первые минуты держат lock фоновым unattended-upgrades — из-за него
+# падал бы и наш apt-get, и установщик get.docker.com.
+
+apt_busy() {
+  if command -v fuser >/dev/null 2>&1; then
+    fuser /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock >/dev/null 2>&1
+  else
+    pgrep -f 'unattended-upgr|apt-get|aptd|dpkg' >/dev/null 2>&1
+  fi
+}
+
+wait_for_apt() {
+  local waited=0
+  while apt_busy; do
+    [ "$waited" -eq 0 ] && info "Жду, пока фоновое обновление системы отпустит dpkg (свежий сервер, обычно 1–5 минут)…"
+    sleep 5
+    waited=$((waited + 5))
+    [ "$waited" -ge 900 ] && die "dpkg занят дольше 15 минут. Посмотрите, что происходит: ps aux | grep -E 'apt|dpkg'"
+  done
+  [ "$waited" -gt 0 ] && info "dpkg освободился (ждали ${waited} с)."
+  return 0
+}
+
 # --- Docker + compose plugin -------------------------------------------------
 
 if ! docker_ok || ! compose_ok; then
@@ -90,10 +114,11 @@ if ! docker_ok || ! compose_ok; then
     *) warn "Автоустановка рассчитана на Ubuntu/Debian, обнаружено: ${PRETTY_NAME:-неизвестная ОС}." ;;
   esac
   if confirm "Установить Docker (вместе с compose) официальным скриптом get.docker.com?"; then
+    wait_for_apt
     command -v curl >/dev/null 2>&1 || {
       info "Ставлю curl…"
-      apt-get update -qq
-      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl
+      apt-get -o DPkg::Lock::Timeout=300 update -qq
+      DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y -qq curl
     }
     info "Устанавливаю Docker…"
     curl -fsSL https://get.docker.com | sh
