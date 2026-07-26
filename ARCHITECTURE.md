@@ -373,7 +373,7 @@ text-slate-950 font-medium`, ссылки/активная навигация `t
   `CMD ["node","/app/server/dist/index.js"]`.
 - **deploy/docker-compose.yml**: build context `..`, `cap_add: NET_ADMIN`,
   sysctls `net.ipv4.ip_forward=1`, `net.ipv4.conf.all.src_valid_mark=1`,
-  ports `51820:51820/udp`, `8080:8080/tcp`, volume `wiredeck_data:/data`,
+  ports `${WG_PORT:-51820}/udp` и `${PANEL_PORT:-8080}:8080`, volume `wiredeck_data:/data`,
   env `WG_HOST` (обязателен), restart unless-stopped.
 - **Management-скрипты в корне** (основной способ управления): `start.sh` —
   первичная настройка и запуск (проверка/установка Docker, WG_HOST → deploy/.env,
