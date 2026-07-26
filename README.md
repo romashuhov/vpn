@@ -81,7 +81,7 @@ curl -fsSL https://raw.githubusercontent.com/romashuhov/vpn/main/deploy/install.
 | `WG_MOCK` | авто | `1`/`true` — мок-режим без реального WireGuard; по умолчанию мок везде, кроме Linux |
 | `WG_MOCK_SEED` | `1` в мок-режиме | Засеять демо-пользователей и историю трафика |
 | `PORT` / `HOST` | `8080` / `0.0.0.0` | HTTP-порт и адрес веб-панели |
-| `COOKIE_SECURE` | `0` | `1` — ставить флаг `Secure` на сессионную cookie; включите, когда панель за reverse proxy с TLS |
+| `COOKIE_SECURE` | `0` | `1` — флаг `Secure` на сессионную cookie. Включайте **только когда панель уже за TLS**: по голому `http://IP:8080` браузер отбросит такую cookie и войти будет невозможно |
 | `DATA_DIR` | `./data` (в Docker — `/data`) | Каталог с SQLite-базой и конфигом интерфейса |
 | `POLL_INTERVAL_MS` | `15000` | Период опроса статистики WireGuard |
 | `WEB_DIST` | `../../web/dist` от `server/dist` | Путь к собранной SPA |

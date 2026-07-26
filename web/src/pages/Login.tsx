@@ -45,6 +45,19 @@ export default function Login({ needsSetup, onSuccess }: Props) {
       } else {
         await api.login(password);
       }
+      // Логин может «пройти» (204), а cookie сессии — не сохраниться: браузер
+      // молча отбрасывает Secure-cookie на http-адресах (кроме localhost).
+      // Без этой проверки форма оставалась бы с вечным спиннером.
+      const status = await api.authStatus();
+      if (!status.authenticated) {
+        setError(
+          'Пароль верный, но браузер не сохранил cookie сессии. Обычно это ' +
+            'COOKIE_SECURE=1 при входе по http:// — уберите его из deploy/.env ' +
+            '(и сделайте ./restart.sh) либо откройте панель по https.',
+        );
+        setBusy(false);
+        return;
+      }
       onSuccess();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось войти');

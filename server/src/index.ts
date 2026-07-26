@@ -91,6 +91,14 @@ async function main(): Promise<void> {
     reply.code(404).type('text/plain; charset=utf-8').send('WireDeck: веб-интерфейс не собран');
   });
 
+  if (config.cookieSecure) {
+    console.warn(
+      '[http] COOKIE_SECURE=1: cookie сессии ставится только по HTTPS. ' +
+        'Вход по http://<IP>:' + config.port + ' работать НЕ будет (браузер отбросит cookie) — ' +
+        'заходите через reverse proxy с TLS либо уберите COOKIE_SECURE из deploy/.env.',
+    );
+  }
+
   const address = await app.listen({ port: config.port, host: config.host });
   console.log(`[http] WireDeck запущен: ${address}`);
   if (config.host === '0.0.0.0' || config.host === '::') {
