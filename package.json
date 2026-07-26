@@ -2,7 +2,7 @@
   "name": "wiredeck",
   "private": true,
   "version": "0.1.0",
-  "description": "WireDeck — self-hosted панель управления WireGuard VPN",
+  "description": "WireDeck — self-hosted панель управления VPN на AmneziaWG и WireGuard",
   "workspaces": [
     "server",
     "web"
