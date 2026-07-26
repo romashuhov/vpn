@@ -2,12 +2,11 @@
 #
 # WireDeck — запуск после клона одной командой: ./start.sh
 #
-# Сам проверит (и при необходимости поставит) Docker с compose-плагином,
+# Полностью без вопросов: сам поставит Docker с compose-плагином (если нет),
 # определит публичный IP, запишет deploy/.env и поднимет контейнер.
 # Пароль администратора задаётся в веб-панели при первом входе.
 #
 # Публичный адрес можно задать заранее:  WG_HOST=vpn.example.com ./start.sh
-# Неинтерактивный режим (авто-«да»):     WIREDECK_YES=1 ./start.sh
 
 set -euo pipefail
 
@@ -27,30 +26,6 @@ SELF="$ROOT/$(basename "${BASH_SOURCE[0]}")"
 DEPLOY="$ROOT/deploy"
 ENV_FILE="$DEPLOY/.env"
 
-# --- ввод с терминала --------------------------------------------------------
-
-have_tty() { { : </dev/tty; } 2>/dev/null; }
-
-# ask "вопрос" имя_переменной "дефолт".
-# Внутренние имена с __-префиксом: printf -v пишет в переменную по имени, и при
-# совпадении с именем нашей локали (динамическая область видимости bash) результат
-# осел бы во внутренней переменной и умер при выходе из функции.
-ask() {
-  local __prompt="$1" __var="$2" __def="${3-}" __answer=""
-  if have_tty; then
-    read -r -p "$__prompt" __answer </dev/tty || true
-  fi
-  printf -v "$__var" '%s' "${__answer:-$__def}"
-}
-
-confirm() { # y/n; WIREDECK_YES=1 или отсутствие терминала = «да» (headless-установка)
-  [ -n "${WIREDECK_YES:-}" ] && return 0
-  have_tty || return 0
-  local answer=""
-  ask "$1 [y/N]: " answer "n"
-  [[ "$answer" =~ ^[YyДд] ]]
-}
-
 # --- права -------------------------------------------------------------------
 # root нужен, если docker отсутствует, недоступен текущему юзеру или демон лежит.
 
@@ -65,7 +40,6 @@ if [ "$(id -u)" -ne 0 ]; then
     # sudo с env_reset вычищает окружение — протаскиваем наши переменные через `env`.
     envargs=()
     [ -n "${WG_HOST+x}" ] && envargs+=("WG_HOST=$WG_HOST")
-    [ -n "${WIREDECK_YES+x}" ] && envargs+=("WIREDECK_YES=$WIREDECK_YES")
     exec sudo env "${envargs[@]}" bash "$SELF" "$@"
   fi
 fi
@@ -111,18 +85,14 @@ if ! docker_ok || ! compose_ok; then
     *debian*|*ubuntu*) ;;
     *) warn "Автоустановка рассчитана на Ubuntu/Debian, обнаружено: ${PRETTY_NAME:-неизвестная ОС}." ;;
   esac
-  if confirm "Установить Docker (вместе с compose) официальным скриптом get.docker.com?"; then
-    wait_for_apt
-    command -v curl >/dev/null 2>&1 || {
-      info "Ставлю curl…"
-      apt-get -o DPkg::Lock::Timeout=300 update -qq
-      DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y -qq curl
-    }
-    info "Устанавливаю Docker…"
-    curl -fsSL https://get.docker.com | sh
-  else
-    die "Без Docker продолжить нельзя. Установите вручную (https://docs.docker.com/engine/install/) и запустите ./start.sh снова."
-  fi
+  wait_for_apt
+  command -v curl >/dev/null 2>&1 || {
+    info "Ставлю curl…"
+    apt-get -o DPkg::Lock::Timeout=300 update -qq
+    DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y -qq curl
+  }
+  info "Устанавливаю Docker (официальный скрипт get.docker.com)…"
+  curl -fsSL https://get.docker.com | sh
   docker_ok  || die "Docker так и не появился в PATH — установка не удалась."
   compose_ok || die "Плагин «docker compose» недоступен — установите docker-compose-plugin и повторите."
 fi
@@ -152,15 +122,10 @@ if [ -n "$current_host" ]; then
 else
   wg_host="${WG_HOST:-}"
   if [ -z "$wg_host" ]; then
-    detected_ip="$(curl -4fsS --max-time 10 https://api.ipify.org 2>/dev/null || true)"
-    if [ -n "$detected_ip" ]; then
-      info "Определён публичный IP: $detected_ip"
-    else
-      warn "Не удалось определить публичный IP автоматически."
-    fi
-    ask "Публичный IP или домен сервера [${detected_ip:-введите вручную}]: " wg_host "$detected_ip"
+    wg_host="$(curl -4fsS --max-time 10 https://api.ipify.org 2>/dev/null || true)"
+    [ -n "$wg_host" ] && info "Определён публичный IP: $wg_host"
   fi
-  [ -n "$wg_host" ] || die "WG_HOST обязателен: без него клиентские конфиги не будут указывать на ваш сервер. Задайте так: WG_HOST=1.2.3.4 ./start.sh"
+  [ -n "$wg_host" ] || die "Не удалось определить публичный IP автоматически. Задайте адрес явно: WG_HOST=<IP или домен> ./start.sh"
   [ -w "$DEPLOY" ] || die "Нет прав на запись в $DEPLOY — запустите через sudo."
   tmp_env="$(mktemp)"
   if [ -r "$ENV_FILE" ]; then
