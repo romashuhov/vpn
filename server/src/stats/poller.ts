@@ -78,14 +78,24 @@ export function startPoller(runner: WgRunner, intervalMs: number): void {
         liveRates.set(user.id, { rateRx: 0, rateTx: 0, at: Date.now() });
       }
 
-      const handshakeChanged = peer.lastHandshake !== user.lastHandshake;
+      // Время хендшейка двигаем только ВПЕРЁД. Свежесозданный интерфейс
+      // (рестарт панели, смена движка, перезагрузка сервера) отдаёт для всех
+      // пиров нулевой хендшейк — то есть «никогда». Записав этот ноль, мы бы
+      // стёрли историю: юзер, который вчера выкачал гигабайты, показывался бы
+      // как ни разу не подключавшийся.
+      const nextHandshake =
+        peer.lastHandshake !== null &&
+        (user.lastHandshake === null || peer.lastHandshake > user.lastHandshake)
+          ? peer.lastHandshake
+          : user.lastHandshake;
+      const handshakeChanged = nextHandshake !== user.lastHandshake;
       if (dRx <= 0 && dTx <= 0 && !handshakeChanged) continue; // писать нечего
 
       try {
         updateCounters(user.id, {
           totalRx: user.totalRx + dRx,
           totalTx: user.totalTx + dTx,
-          lastHandshake: handshakeChanged ? peer.lastHandshake : user.lastHandshake,
+          lastHandshake: nextHandshake,
         });
         if (dRx > 0 || dTx > 0) {
           addHourlyTraffic(user.id, hourTs, dRx, dTx);
