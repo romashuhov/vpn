@@ -176,7 +176,10 @@ fi
 # Порты для проверок и итогового вывода: из окружения либо deploy/.env
 # (compose читает те же значения — источники должны совпадать).
 env_val() {
-  local name="$1" def="$2" v="${!name:-}"
+  # Объявление и присваивание раздельно: в bash 5.2 `${!name}` в той же строке
+  # local раскрывается раньше, чем присвоен сам name («invalid indirect expansion»).
+  local name="$1" def="$2" v
+  v="${!name:-}"
   if [ -z "$v" ] && [ -r "$ENV_FILE" ]; then
     v="$(grep -E "^${name}=" "$ENV_FILE" | tail -1 | cut -d= -f2- \
       | tr -d '\r' | sed -e "s/^[\"']//" -e "s/[\"']\$//")"
