@@ -64,3 +64,14 @@ export interface OnlineUserDTO {
 }
 
 export type Range = '24h' | '7d' | '30d';
+
+/**
+ * Конфиг в формате приложения AmneziaVPN (GET /api/users/:id/amnezia).
+ * `link` — строка `vpn://…` (на телефоне открывает приложение в одно нажатие).
+ * `qrChunks` — отдельная упаковка для QR (не сама ссылка!): при длинных конфигах
+ * чанков может быть несколько, тогда одним QR-кодом их показать нельзя.
+ */
+export interface AmneziaExportDTO {
+  link: string;
+  qrChunks: string[];
+}

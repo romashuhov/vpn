@@ -54,6 +54,7 @@ server/
     config.ts        — каркас (готово): env-конфиг
     types.ts         — каркас (готово): общие типы
     awg.ts           — агент wg: параметры обфускации AmneziaWG (генерация, БД, env)
+    amnezia.ts       — агент api: упаковка конфига в формат AmneziaVPN (ссылка vpn:// + QR)
     ipam.ts          — агент wg: выделение IP в подсети
     wg/
       runner.ts      — каркас (готово): интерфейс WgRunner
@@ -329,7 +330,30 @@ export function destroySession(token: string | undefined): void
 // api/routes.ts
 export function registerRoutes(app: FastifyInstance,
   deps: { cfg: Config; runner: WgRunner }): void
+
+// amnezia.ts — тот же конфиг в формате приложения AmneziaVPN (не AmneziaWG!)
+export interface AmneziaExport { link: string; qrChunks: string[] }
+export function buildAmneziaExport(cfg: Config, user: UserRow,
+  serverPublicKey: string, clientConf: string): AmneziaExport
+export function decodeForTest(qrChunkOrLink: string | string[]): Record<string, unknown>
 ```
+
+**Формат AmneziaVPN** (разобран по исходникам `amnezia-vpn/amnezia-client`):
+JSON `{ containers: [{ "<awg|wireguard>": { isThirdPartyConfig: true, last_config,
+port: "<строка>", transport_proto: "udp" }, container: "amnezia-awg|amnezia-wireguard" }],
+defaultContainer, description: <имя юзера>, dns1/dns2 (только IPv4), hostName }`;
+`last_config` — ВЛОЖЕННЫЙ JSON, сериализованный **в строку**: `Jc/Jmin/Jmax/S1/S2/H1…H4`
+(строками, только при `engine === 'awg'`), `allowed_ips` (массив), `client_ip` `<ip>/32`,
+`client_priv_key`, `config` (полный текст .conf — берётся из `renderClientConfig`,
+второго источника правды быть не должно), `hostName`, `mtu`, `persistent_keep_alive`,
+`port` (**числом**), `psk_key`, `server_pub_key`. Ключи с пустым значением не выводятся
+вовсе — пустая строка ломает импорт на стороне клиента.
+Сжатие — эквивалент Qt `qCompress`: `[4 байта BE: длина исходного JSON] + zlib.deflate(level 8)`.
+`link` = `'vpn://' + base64url(сжатое)` без `=`. `qrChunks` — ЭТО НЕ ссылка: каждый
+элемент = base64url от `[2 байта 0x07C0][1 байт всего чанков][1 байт номер с 0]
+[4 байта BE длина блока][блок]`, блок — кусок сжатого не длиннее 850 байт
+(`chunks = ceil(len/850)`). Наши конфиги дают один чанк; больше одного означает, что
+одиночный QR нарисовать нельзя — фронт обязан предложить ссылку/файл вместо битого QR.
 
 **index.ts (bootstrap)**: openDb → ключи сервера в settings (genKeypair, если нет) →
 maybeSeedDemo → createRunner → `runner.up(buildServerState(...))` → startPoller →
@@ -360,6 +384,7 @@ Fastify: @fastify/cookie, registerRoutes, @fastify/static (root = cfg.webDist,
 | PATCH `/api/users/:id` | `{name?, enabled?}` | 200 `UserDTO`; → `runner.sync` при смене enabled |
 | DELETE `/api/users/:id` | — | 204; → `runner.sync` |
 | GET `/api/users/:id/config` | — | 200 text/plain, `Content-Disposition: attachment; filename="<safe>.conf"` (safe = [a-zA-Z0-9_-], иначе `wg-client-<id>`) |
+| GET `/api/users/:id/amnezia` | — | 200 `AmneziaExportDTO` = `{link, qrChunks}` — тот же конфиг в формате приложения AmneziaVPN; 404 |
 | GET `/api/stats/overview` | — | 200 `OverviewDTO` |
 | GET `/api/stats/timeseries?range=24h\|7d\|30d&user=<id?>` | — | 200 `TimeseriesPoint[]` |
 | GET `/api/stats/top?range=` | — | 200 `UserUsage[]` |
@@ -390,11 +415,17 @@ SPA на русском. `web/src/lib/api.ts` (готово) — единств�
 
 // components/PeerConfig.tsx — props: { userId: number; userName: string }
 // Сам грузит текст конфига через api.getUserConfig, показывает: QR-код (библиотека
-// qrcode, toDataURL, размер ~260px), кнопки «Скачать .conf» (Blob) и «Скопировать».
-// При server.engine === 'awg' (api.overview(), промис кэшируется на модуль,
-// ошибки молча → 'wg') над QR — амбер-плашка: конфиг открывается только
-// приложением AmneziaWG (не AmneziaVPN — оно ждёт формат vpn://), официальный клиент WireGuard
-// его не поймёт.
+// qrcode, toDataURL, ~420px, errorCorrectionLevel 'L' — длинный awg-конфиг иначе
+// не сканируется), кнопки «Скачать .conf» (Blob) и «Скопировать».
+// При server.engine === 'awg' (api.overview(), промис кэшируется на модуль, ошибки
+// молча → 'wg') сверху — сегментированный переключатель формата «AmneziaWG» /
+// «AmneziaVPN» (по образцу RangeTabs). Вкладка «AmneziaVPN» лениво тянет
+// api.amneziaExport(id) и показывает QR из qrChunks[0] + саму ссылку vpn://…
+// (кликабельная, + кнопка «Скопировать ссылку»); при qrChunks.length > 1 QR не
+// рисуется вовсе — вместо него текст «воспользуйтесь ссылкой/файлом».
+// Подача СПОКОЙНАЯ: обычный блок slate («Приложение: AmneziaWG/AmneziaVPN/WireGuard»
+// + где взять), без амбер/красных плашек и иконок предупреждения — AmneziaWG это
+// нормальный режим работы панели, а не отклонение.
 
 // pages/Login.tsx — props: { needsSetup: boolean; onSuccess: () => void }
 // Центрированная карточка. needsSetup=true → «Придумайте пароль администратора»

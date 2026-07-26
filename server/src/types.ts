@@ -72,6 +72,17 @@ export interface UserDTO {
   online: boolean; // handshake < 180 сек назад
 }
 
+/**
+ * Экспорт конфига в формате приложения AmneziaVPN: ссылка vpn://… (открывает
+ * приложение и импортирует подключение) и нагрузка для QR-кода. qrChunks почти
+ * всегда содержит один элемент; больше одного означает, что конфиг не влез в
+ * один QR — тогда одиночный QR рисовать нельзя, нужна ссылка или файл.
+ */
+export interface AmneziaExportDTO {
+  link: string;
+  qrChunks: string[];
+}
+
 export interface ServerInfo {
   host: string;
   port: number;

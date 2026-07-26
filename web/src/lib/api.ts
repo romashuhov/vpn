@@ -1,4 +1,5 @@
 import type {
+  AmneziaExportDTO,
   AuthStatus,
   OnlineUserDTO,
   OverviewDTO,
@@ -58,6 +59,8 @@ export const api = {
     req<UserDTO>('PATCH', `/api/users/${id}`, patch),
   deleteUser: (id: number) => req<void>('DELETE', `/api/users/${id}`),
   getUserConfig: (id: number) => req<string>('GET', `/api/users/${id}/config`),
+  /** Ссылка vpn://… и QR-чанки для приложения AmneziaVPN (только при engine 'awg'). */
+  amneziaExport: (id: number) => req<AmneziaExportDTO>('GET', `/api/users/${id}/amnezia`),
 
   overview: () => req<OverviewDTO>('GET', '/api/stats/overview'),
   timeseries: (range: Range, userId?: number) =>

@@ -3,7 +3,7 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import '@fastify/cookie'; // типовая аугментация req.cookies / reply.setCookie
 import type { Config } from '../config.js';
-import type { Range, UserDTO, UserRow } from '../types.js';
+import type { AmneziaExportDTO, Range, UserDTO, UserRow } from '../types.js';
 import type { WgRunner } from '../wg/runner.js';
 import {
   checkSession,
@@ -14,6 +14,7 @@ import {
   verifyPasswordAsync,
 } from '../auth.js';
 import { createUser, deleteUser, getSetting, getUser, listUsers, updateUser } from '../db.js';
+import { buildAmneziaExport } from '../amnezia.js';
 import { nextFreeAddress } from '../ipam.js';
 import { buildServerState, renderClientConfig } from '../wg/confgen.js';
 import { genKeypair, genPresharedKey } from '../wg/keys.js';
@@ -355,7 +356,27 @@ export function registerRoutes(
       .code(200)
       .header('Content-Type', 'text/plain; charset=utf-8')
       .header('Content-Disposition', `attachment; filename="${filename}"`)
+      // В теле — приватный ключ клиента: браузеру нельзя класть его в дисковый кеш.
+      .header('Cache-Control', 'no-store')
       .send(text);
+  });
+
+  // Тот же конфиг, но упакованный для приложения AmneziaVPN: ссылка vpn://…
+  // (одно нажатие на телефоне, без камеры) и нагрузка для QR. Маршрут под
+  // общей авторизацией: он не в PUBLIC_API_ROUTES, значит хук требует сессию.
+  app.get<{ Params: { id: string } }>('/api/users/:id/amnezia', async (req, reply) => {
+    const id = parseId(req.params.id);
+    if (id === null) return reply.code(400).send({ error: 'Некорректный идентификатор' });
+    const user = getUser(id);
+    if (!user) return reply.code(404).send({ error: 'Пользователь не найден' });
+    const serverPublicKey = getSetting('server_public_key');
+    if (!serverPublicKey) {
+      return reply.code(500).send({ error: 'Серверный ключ не найден в настройках' });
+    }
+    const clientConf = renderClientConfig(cfg, serverPublicKey, user);
+    const body: AmneziaExportDTO = buildAmneziaExport(cfg, user, serverPublicKey, clientConf);
+    // Внутри link/qrChunks — приватный ключ клиента и preshared: не кешировать.
+    return reply.code(200).header('Cache-Control', 'no-store').send(body);
   });
 
   // ---- Stats ----
