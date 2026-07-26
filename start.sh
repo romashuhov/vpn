@@ -33,18 +33,22 @@ WG_UDP_PORT=51820
 
 have_tty() { { : </dev/tty; } 2>/dev/null; }
 
-ask() { # ask "вопрос" имя_переменной "дефолт"
-  local prompt="$1" __var="$2" def="${3-}" answer=""
+# ask "вопрос" имя_переменной "дефолт".
+# Внутренние имена с __-префиксом: printf -v пишет в переменную по имени, и при
+# совпадении с именем нашей локали (динамическая область видимости bash) результат
+# осел бы во внутренней переменной и умер при выходе из функции.
+ask() {
+  local __prompt="$1" __var="$2" __def="${3-}" __answer=""
   if have_tty; then
-    read -r -p "$prompt" answer </dev/tty || true
+    read -r -p "$__prompt" __answer </dev/tty || true
   fi
-  printf -v "$__var" '%s' "${answer:-$def}"
+  printf -v "$__var" '%s' "${__answer:-$__def}"
 }
 
 confirm() { # y/n; WIREDECK_YES=1 или отсутствие терминала = «да» (headless-установка)
   [ -n "${WIREDECK_YES:-}" ] && return 0
   have_tty || return 0
-  local answer
+  local answer=""
   ask "$1 [y/N]: " answer "n"
   [[ "$answer" =~ ^[YyДд] ]]
 }
