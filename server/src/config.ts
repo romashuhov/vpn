@@ -44,7 +44,11 @@ export const config = {
     dns: env('WG_DNS', '1.1.1.1'),
     allowedIps: env('WG_ALLOWED_IPS', '0.0.0.0/0, ::/0'),
     persistentKeepalive: Number(env('WG_PERSISTENT_KEEPALIVE', '25')),
-    mtu: env('WG_MTU', ''),
+    // 1280 по умолчанию — консервативный минимум, проходящий через мобильные
+    // сети и пути с уменьшенным MTU (PMTU blackhole — главный источник
+    // «подключается, но ничего не грузит»). WG_MTU=off — не указывать MTU
+    // вовсе (дефолт WireGuard 1420, чуть быстрее, но ловит blackhole).
+    mtu: ((v) => (v === 'off' || v === '0' ? '' : v))(env('WG_MTU', '1280')),
     mock,
     mockSeed: env('WG_MOCK_SEED', mock ? '1' : '0') === '1',
   },
